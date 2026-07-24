@@ -1,0 +1,357 @@
+/* Atlas del Centro
+   ----------------
+   The subject is a legal-architectural instrument: an official register that ranks
+   which buildings deserve to survive (Grado 0, "sustitución deseable", through
+   Grado 4, "protección integral"). The palette makes that ranking literal — a single
+   amber ramp from dim umber to bright gold, so the 57 Grado 4 buildings glow against
+   a recessive mass of un-catalogued stock.
+
+   Type is geometric sans (Futura, 1927) — exactly contemporaneous with the Art Deco
+   boom that built this part of Montevideo — set in wide uppercase tracking for
+   labels, with mono for the numeric fields an architect would letter by hand.
+
+   All three data ramps are single-hue and validated against the ground colour. */
+
+:root {
+  --ground: #0E1219;
+  --panel: #151B24;
+  --panel-2: #1B222D;
+  --rule: #26303D;
+  --rule-bright: #38455780;
+
+  --bone: #E9E3D5;
+  --bone-dim: #9A9384;
+  --muted: #6A7183;
+
+  /* Grade ramp — ordinal, single hue, validated */
+  --g0: #5F5241;
+  --g1: #7E6746;
+  --g2: #9F7F42;
+  --g3: #CB9E42;
+  --g4: #FFD873;
+  --rg: #2E3846;
+  --sc: #232A34;
+
+  --focus: #FFD873;
+
+  --font-display: 'Century Gothic', 'Futura', 'Avenir Next', 'URW Gothic', 'Questrial', system-ui, sans-serif;
+  --font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'Consolas', 'SF Mono', 'Menlo', 'DejaVu Sans Mono', monospace;
+
+  --rail-top: 3.75rem;
+  --rail-bottom: 11rem;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--ground);
+  color: var(--bone);
+  font-family: var(--font-body);
+  font-size: 14px;
+  display: grid;
+  grid-template-rows: var(--rail-top) 1fr var(--rail-bottom);
+  overflow: hidden;
+}
+
+h1, h2 { margin: 0; font-weight: 400; }
+
+/* ---------- rails ---------- */
+
+.rail {
+  background: var(--panel);
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.rail--top {
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0 1.25rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.rail--bottom {
+  align-items: stretch;
+  border-top: 1px solid var(--rule);
+  overflow: hidden;
+}
+
+.rail--bottom > section {
+  padding: 0.75rem 1.25rem;
+  min-width: 0;
+}
+
+.rail--bottom > section + section { border-left: 1px solid var(--rule); }
+
+.rail--bottom h2 {
+  font-family: var(--font-display);
+  font-size: 0.625rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+}
+
+/* ---------- masthead ---------- */
+
+.masthead { display: flex; align-items: baseline; gap: 0.75rem; min-width: 0; }
+
+.masthead h1 {
+  font-family: var(--font-display);
+  font-size: 1.0625rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.masthead__sub {
+  margin: 0;
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- controls ---------- */
+
+.controls { display: flex; align-items: center; gap: 1rem; }
+
+.segmented { display: flex; border: 1px solid var(--rule); }
+
+.segmented button {
+  background: none;
+  border: 0;
+  border-right: 1px solid var(--rule);
+  color: var(--bone-dim);
+  font-family: var(--font-display);
+  font-size: 0.625rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 0.5rem 0.875rem;
+  cursor: pointer;
+  transition: color 120ms, background-color 120ms;
+}
+
+.segmented button:last-child { border-right: 0; }
+.segmented button:hover { color: var(--bone); background: var(--panel-2); }
+
+.segmented button.is-active {
+  color: var(--ground);
+  background: var(--g4);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--font-display);
+  font-size: 0.625rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--bone-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle input { accent-color: var(--g4); cursor: pointer; }
+
+:where(button, input, canvas, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ---------- stage ---------- */
+
+.stage { position: relative; overflow: hidden; }
+
+.stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#map { cursor: crosshair; }
+#overlay { pointer-events: none; }
+
+.stage__hint {
+  position: absolute;
+  left: 1.25rem;
+  bottom: 1rem;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.625rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  pointer-events: none;
+  transition: opacity 200ms;
+}
+
+/* ---------- title block (signature) ---------- */
+
+.titleblock {
+  position: absolute;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  width: 17.5rem;
+  background: var(--panel);
+  border: 1px solid var(--rule-bright);
+  box-shadow: 0 8px 28px #00000073;
+}
+
+.titleblock__grade { height: 3px; background: var(--rg); }
+
+.titleblock dl { margin: 0; }
+
+.tb-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.tb-row--wide { flex-direction: column; align-items: stretch; gap: 0.15rem; }
+
+.titleblock dt {
+  font-family: var(--font-display);
+  font-size: 0.5625rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.titleblock dd { margin: 0; font-size: 0.8125rem; color: var(--bone); }
+.titleblock dd.mono { font-family: var(--font-mono); letter-spacing: 0.02em; }
+.tb-row--wide dd { font-size: 0.9375rem; }
+
+.titleblock__detail {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  color: var(--bone-dim);
+}
+
+.titleblock__detail:empty { display: none; }
+
+/* ---------- legend ---------- */
+
+.legend { flex: 0 0 18.5rem; overflow-y: auto; }
+.legend ul { list-style: none; margin: 0; padding: 0; }
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.09rem 0;
+  font-size: 0.7rem;
+  color: var(--bone-dim);
+}
+
+/* Rows stay single-line so all seven grades fit the rail without scrolling; the
+   unabbreviated name is on the element's title. */
+.legend__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.legend .swatch {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: none;
+  border: 1px solid #ffffff1f;
+}
+
+.legend .count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
+/* ---------- histogram ---------- */
+
+.histogram { flex: 1 1 auto; display: flex; flex-direction: column; }
+.histogram__head { display: flex; align-items: baseline; gap: 0.75rem; }
+
+.histogram__head button {
+  background: none;
+  border: 1px solid var(--rule);
+  color: var(--bone-dim);
+  font-family: var(--font-display);
+  font-size: 0.5625rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.5rem;
+  margin-left: auto;
+  cursor: pointer;
+}
+
+.histogram__head button:hover { color: var(--bone); border-color: var(--muted); }
+
+#hist { flex: 1; width: 100%; min-height: 0; }
+
+#hist text {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--muted);
+}
+
+#hist .axis-line { stroke: var(--rule); stroke-width: 1; }
+
+.histogram__note {
+  margin: 0.25rem 0 0;
+  font-size: 0.6875rem;
+  color: var(--muted);
+  min-height: 1em;
+}
+
+/* ---------- provenance ---------- */
+
+.provenance { flex: 0 0 15rem; overflow-y: auto; }
+
+.provenance p {
+  margin: 0;
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.provenance strong { color: var(--bone-dim); font-weight: 400; }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 900px) {
+  :root { --rail-bottom: 15rem; }
+  .rail--bottom { flex-direction: column; overflow-y: auto; }
+  .rail--bottom > section + section {
+    border-left: 0;
+    border-top: 1px solid var(--rule);
+  }
+  .legend, .provenance { flex: none; }
+  .titleblock { left: 1.25rem; right: 1.25rem; width: auto; }
+}
+
+@media (max-width: 600px) {
+  .rail--top { flex-direction: column; align-items: flex-start; justify-content: center; gap: 0.35rem; padding: 0.5rem 1rem; }
+  :root { --rail-top: 5.5rem; }
+  .masthead { flex-direction: column; gap: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}

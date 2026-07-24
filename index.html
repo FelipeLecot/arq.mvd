@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlas del Centro — Montevideo</title>
+<link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+
+<header class="rail rail--top">
+  <div class="masthead">
+    <h1>Atlas del Centro</h1>
+    <p class="masthead__sub">Inventario Patrimonial · Montevideo</p>
+  </div>
+
+  <div class="controls">
+    <div class="segmented" role="group" aria-label="Atributo">
+      <button type="button" data-attr="grado" class="is-active">Protección</button>
+      <button type="button" data-attr="altura">Altura</button>
+      <button type="button" data-attr="permits">Obras</button>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="extrude-toggle" checked>
+      <span>Volumen</span>
+    </label>
+  </div>
+</header>
+
+<main class="stage">
+  <canvas id="map"></canvas>
+  <canvas id="overlay"></canvas>
+  <p class="stage__hint" id="hint">Pasá el cursor sobre un padrón</p>
+
+  <!-- Signature element: an architect's title block. Fields are the ones a survey
+       drawing carries in its corner — padrón, address, grade, envelope. -->
+  <aside class="titleblock" id="titleblock" hidden aria-live="polite">
+    <div class="titleblock__grade" id="tb-gradebar"></div>
+    <dl>
+      <div class="tb-row tb-row--wide">
+        <dt>Padrón</dt><dd class="mono" id="tb-padron">—</dd>
+      </div>
+      <div class="tb-row tb-row--wide">
+        <dt>Dirección</dt><dd id="tb-address">—</dd>
+      </div>
+      <div class="tb-row">
+        <dt>Altura normativa</dt><dd class="mono" id="tb-altura">—</dd>
+      </div>
+      <div class="tb-row">
+        <dt>Obras desde 1997</dt><dd class="mono" id="tb-permits">—</dd>
+      </div>
+      <div class="tb-row tb-row--wide">
+        <dt>Grado de protección</dt><dd id="tb-grado">—</dd>
+      </div>
+    </dl>
+    <p class="titleblock__detail" id="tb-detail"></p>
+  </aside>
+</main>
+
+<footer class="rail rail--bottom">
+  <section class="legend" aria-label="Referencias">
+    <h2 id="legend-title">Protección</h2>
+    <ul id="legend-items"></ul>
+  </section>
+
+  <section class="histogram">
+    <div class="histogram__head">
+      <h2 id="hist-title">Distribución</h2>
+      <button type="button" id="hist-clear" hidden>Limpiar selección</button>
+    </div>
+    <svg id="hist" role="img" aria-label="Distribución del atributo activo"></svg>
+    <p class="histogram__note" id="hist-note"></p>
+  </section>
+
+  <section class="provenance">
+    <h2>Alcance</h2>
+    <p id="coverage">Cargando…</p>
+  </section>
+</footer>
+
+<script type="module" src="/dist/bundle.js"></script>
+</body>
+</html>

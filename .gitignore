@@ -1,0 +1,9 @@
+node_modules/
+dist/
+
+# Raw downloads from the IM endpoints — large, regenerable via `npm run fetch`.
+data/raw/
+
+# Built artefacts — regenerable via `npm run build:data`.
+data/*.topo.json
+data/attrs.json
