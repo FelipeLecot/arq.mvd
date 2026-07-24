@@ -14,8 +14,12 @@ export const GRADE_COLORS = {
   G2: '#9F7F42',
   G3: '#CB9E42',
   G4: '#FFD873',
-  RG: '#2E3846',
-  SC: '#232A34',
+  // Off-ramp neutrals. These are NOT a low grade — they are parcels the inventory did
+  // not grade — so they stay neutral while the graded ramp carries the warmth. They sit
+  // above a 2:1 contrast floor against the ground: at 1.58:1 the old Régimen General
+  // read as missing data, which it is not (it is 43% of Centro).
+  RG: '#414E61',
+  SC: '#4A4750',
 };
 
 export const GRADE_ORDER = ['G0', 'G1', 'G2', 'G3', 'G4', 'RG', 'SC'];
@@ -60,8 +64,12 @@ export const PERMIT_BUCKETS = [
   { key: '8+', label: '8 o más', short: '8+', lo: 8, hi: Infinity },
 ];
 
-/** Parcels with no permit at all: the 79% majority, kept recessive. */
-export const NO_PERMIT = '#232A34';
+/**
+ * Parcels with no permit at all: the 79% majority. Recessive, so the rebuilt city reads
+ * against it, but light enough that the urban fabric is still legible — this is a true
+ * zero ("no permit since 1997"), not missing data.
+ */
+export const NO_PERMIT = '#333D49';
 
 export const ATTRIBUTES = {
   grado: {

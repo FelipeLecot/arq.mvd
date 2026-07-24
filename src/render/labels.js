@@ -50,10 +50,10 @@ export function drawLabels(ctx, lines, t, { zoomK = 1, width, height }) {
       const seg = longestSegment(part);
       if (!seg) continue;
 
-      const x1 = seg.x1 * t.a + t.bx;
-      const y1 = -seg.y1 * t.a + t.by;
-      const x2 = seg.x2 * t.a + t.bx;
-      const y2 = -seg.y2 * t.a + t.by;
+      const x1 = seg.x1 * t.m00 + seg.y1 * t.m01 + t.bx;
+      const y1 = seg.x1 * t.m10 + seg.y1 * t.m11 + t.by;
+      const x2 = seg.x2 * t.m00 + seg.y2 * t.m01 + t.bx;
+      const y2 = seg.x2 * t.m10 + seg.y2 * t.m11 + t.by;
       const dx = x2 - x1;
       const dy = y2 - y1;
       const len = Math.hypot(dx, dy);

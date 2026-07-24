@@ -17,6 +17,38 @@ npm run dev          # http://localhost:5173
 
 `npm test` runs the pipeline guards.
 
+## Controls
+
+| Action | Control |
+|---|---|
+| Rotate the plan | Left-drag |
+| Pan | Space + drag, or middle-button drag |
+| Zoom | Wheel |
+| Back to north | `R` |
+| Inspect a parcel | Hover |
+
+Buildings always rise toward the top of the screen, however the plan is turned — the
+extrusion offset stays in screen space while the footprints rotate beneath it. Depth
+ordering is rebuilt when the view turns, since "back" stops meaning "north".
+
+## Every parcel has data
+
+No parcel in the atlas is missing its attributes — `padron`, `grado` and `altura` are
+100% populated, and only 44 of 9,016 lack a street address. What can *look* empty is
+real information:
+
+- **Régimen General — 3,875 parcels (43%).** Inside the inventory but not assigned a
+  heritage grade; general zoning applies. A real regime, not a gap.
+- **Sin Catalogar — 60 parcels (0.7%).** Surveyed, no grade assigned.
+- **Sin permisos — 7,122 parcels (79%)** in the Obras view. A true zero: no approved
+  permit since 1997.
+- **Altura especial — 92 parcels.** A non-numeric height regime, so these never extrude
+  and carry their own off-ramp colour rather than a height.
+
+The ungraded neutrals are drawn recessive so the graded ramp carries the eye, but they
+clear a 2:1 contrast floor against the ground. An earlier build had Régimen General at
+1.58:1, which read as missing data for 43% of the map — that was a bug, not a design.
+
 ## What this covers — and what it doesn't
 
 **This is Centro, not Montevideo.** About 4% of the city's parcels.
@@ -99,13 +131,16 @@ Measured at 1440×900, all 9,016 parcels:
 
 | | median redraw |
 |---|---|
-| During pan/zoom (flat, picking skipped) | ~11 ms |
-| Settled, extruded, full city | ~110 ms |
+| During pan/zoom (flat) | ~19 ms |
+| Settled, extruded, full city | ~132 ms |
 | Extruded, zoomed in (culled) | ~4 ms |
 
 Extrusion of the whole city costs more than a frame, so an active gesture draws the flat
-map and the volume returns when the gesture settles. The picking canvas is left stale
-mid-gesture for the same reason.
+map and the volume returns when the gesture settles.
+
+The picking buffer is **not** drawn on the render path. It is rebuilt lazily, on the first
+pointer move after the view changes, so its cost lands only when someone actually points
+at something rather than on every repaint.
 
 ## Colour
 

@@ -6,6 +6,8 @@
  * information a reader would get from a printed plan.
  */
 
+import { traceRing } from './geometry.js';
+
 const WEIGHTS = {
   AVENIDA: 2.1,
   BULEVAR: 2.1,
@@ -41,9 +43,15 @@ export function drawStreets(ctx, lines, t, { zoomK = 1, color = 'rgba(120,132,15
     ctx.beginPath();
     for (const line of bucket) {
       for (const part of line.parts) {
-        ctx.moveTo(part[0] * t.a + t.bx, -part[1] * t.a + t.by);
+        ctx.moveTo(
+          part[0] * t.m00 + part[1] * t.m01 + t.bx,
+          part[0] * t.m10 + part[1] * t.m11 + t.by,
+        );
         for (let i = 2; i < part.length; i += 2) {
-          ctx.lineTo(part[i] * t.a + t.bx, -part[i + 1] * t.a + t.by);
+          ctx.lineTo(
+            part[i] * t.m00 + part[i + 1] * t.m01 + t.bx,
+            part[i] * t.m10 + part[i + 1] * t.m11 + t.by,
+          );
         }
       }
     }
@@ -51,14 +59,22 @@ export function drawStreets(ctx, lines, t, { zoomK = 1, color = 'rgba(120,132,15
   }
 }
 
-/** The ámbito outline — the edge of what this atlas actually covers. */
-export function drawAmbito(ctx, path, ambito) {
+/**
+ * The ámbito outline — the edge of what this atlas actually covers.
+ * Drawn through the same screen transform as everything else, so it pans and zooms with
+ * the map rather than staying pinned to the viewport.
+ */
+export function drawAmbito(ctx, ambitoItems, t) {
   ctx.save();
   ctx.strokeStyle = 'rgba(233,227,213,0.22)';
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 4]);
   ctx.beginPath();
-  path(ambito);
+  for (const item of ambitoItems) {
+    for (const rings of item.polygons) {
+      for (const ring of rings) traceRing(ctx, ring, t);
+    }
+  }
   ctx.stroke();
   ctx.restore();
 }

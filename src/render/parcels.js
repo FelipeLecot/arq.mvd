@@ -51,15 +51,22 @@ function ensureScratch(size) {
  * rather than one fill per wall. At city scale that is the difference between ~40,000
  * fill calls per frame and ~18,000.
  */
-function drawWalls(ctx, ring, t, ox, oy, shades) {
+function drawWalls(ctx, ring, t, ox, oy, shades, solid = null) {
   const n = ring.length / 2;
   if (n < 3) return;
 
   // Project once; both the winding test and the wall loop read these.
   const pts = ensureScratch(n * 2);
-  for (let i = 0; i < n; i++) {
-    pts[i * 2] = ring[i * 2] * t.a + t.bx;
-    pts[i * 2 + 1] = -ring[i * 2 + 1] * t.a + t.by;
+  if (t.upright) {
+    for (let i = 0; i < n; i++) {
+      pts[i * 2] = ring[i * 2] * t.m00 + t.bx;
+      pts[i * 2 + 1] = ring[i * 2 + 1] * t.m11 + t.by;
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      pts[i * 2] = ring[i * 2] * t.m00 + ring[i * 2 + 1] * t.m01 + t.bx;
+      pts[i * 2 + 1] = ring[i * 2] * t.m10 + ring[i * 2 + 1] * t.m11 + t.by;
+    }
   }
 
   // Winding, from the shoelace sum in screen space, tells us which normal is outward.
@@ -71,8 +78,10 @@ function drawWalls(ctx, ring, t, ox, oy, shades) {
   const wind = area2 > 0 ? 1 : -1;
 
   // Two passes over the edges — front-facing, then side-facing — so each shade is one
-  // path and one fill, with no per-parcel Path2D allocation.
-  for (let pass = 0; pass < 2; pass++) {
+  // path and one fill, with no per-parcel Path2D allocation. The picking pass paints a
+  // single flat id colour, so it collapses to one pass and skips the shading split.
+  const passes = solid ? 1 : 2;
+  for (let pass = 0; pass < passes; pass++) {
     let any = false;
     ctx.beginPath();
 
@@ -90,8 +99,7 @@ function drawWalls(ctx, ring, t, ox, oy, shades) {
       // Visible when the face points against the lift, i.e. toward the viewer.
       if (nx * -ox + ny * -oy <= 0) continue;
 
-      const isSide = Math.abs(nx) > Math.abs(ny);
-      if (isSide !== (pass === 1)) continue;
+      if (!solid && Math.abs(nx) > Math.abs(ny) !== (pass === 1)) continue;
 
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
@@ -102,7 +110,7 @@ function drawWalls(ctx, ring, t, ox, oy, shades) {
     }
 
     if (any) {
-      ctx.fillStyle = pass === 1 ? shades.side : shades.front;
+      ctx.fillStyle = solid ?? (pass === 1 ? shades.side : shades.front);
       ctx.fill();
     }
   }
@@ -114,7 +122,7 @@ function drawWalls(ctx, ring, t, ox, oy, shades) {
  * `pickCtx` receives the same geometry in flat id-colours at the same offsets, so
  * hit-testing lines up with what is on screen — including the lifted roof.
  */
-export function drawParcels(ctx, pickCtx, items, t, opts) {
+export function drawParcels(ctx, items, t, opts) {
   const {
     colors,
     heights,
@@ -183,23 +191,68 @@ export function drawParcels(ctx, pickCtx, items, t, opts) {
       ctx.stroke();
     }
 
-    if (pickCtx) {
-      pickCtx.fillStyle = idColors[id];
-      pickCtx.beginPath();
-      for (const rings of item.polygons) {
-        for (const ring of rings) traceRing(pickCtx, ring, t, ox, oy);
-      }
-      pickCtx.fill('evenodd');
-    }
   }
 
   ctx.globalAlpha = 1;
 }
 
 /**
- * Painter order: back (north, high Mercator y) first. Recomputed only when the data
- * changes, not per frame — the ordering is in Mercator space and zoom cannot alter it.
+ * Paint the id-colour picking buffer.
+ *
+ * Kept separate from the visible draw so it can run lazily — only once the pointer
+ * actually needs it — instead of adding its cost to every frame the map repaints.
+ *
+ * It covers the whole silhouette the eye sees, walls included. Hit-testing only the
+ * roof means a pointer on the side of a building selects whatever stands behind it.
  */
-export function paintOrder(items) {
-  return Array.from(items.keys()).sort((a, b) => items[b].cy - items[a].cy);
+export function drawPicking(pickCtx, items, t, opts) {
+  const { heights, idColors, order, extrude, exaggeration = 1, width, height } = opts;
+
+  for (let oi = 0; oi < order.length; oi++) {
+    const id = order[oi];
+    const item = items[id];
+    if (!item.polygons.length) continue;
+
+    const [minX, minY, maxX, maxY] = featureBounds(item, t);
+    if (maxX < -40 || minX > width + 40 || maxY < -240 || minY > height + 40) continue;
+
+    let ox = 0;
+    let oy = 0;
+    if (extrude) {
+      const metres = heights[id];
+      if (metres != null) {
+        const px = metresToMercator(metres) * t.a * exaggeration;
+        ox = px * LEAN;
+        oy = -px;
+      }
+    }
+
+    const idColor = idColors[id];
+    if (extrude && oy !== 0) {
+      for (const rings of item.polygons) {
+        drawWalls(pickCtx, rings[0], t, ox, oy, null, idColor);
+      }
+    }
+    pickCtx.fillStyle = idColor;
+    pickCtx.beginPath();
+    for (const rings of item.polygons) {
+      for (const ring of rings) traceRing(pickCtx, ring, t, ox, oy);
+    }
+    pickCtx.fill('evenodd');
+  }
+}
+
+/**
+ * Painter order: back of the scene first.
+ *
+ * Depends on rotation but not on zoom or pan, which move every parcel together — so it
+ * is recomputed when the view turns, not per frame. Screen y for a centroid is
+ * proportional to (cx·sinθ − cy·cosθ); sorting ascending puts the far side first. At
+ * θ=0 that reduces to north-first.
+ */
+export function paintOrder(items, rotation = 0) {
+  const sin = Math.sin(rotation);
+  const cos = Math.cos(rotation);
+  const depth = items.map((it) => it.cx * sin - it.cy * cos);
+  return Array.from(items.keys()).sort((a, b) => depth[a] - depth[b]);
 }
