@@ -43,15 +43,9 @@ export function drawStreets(ctx, lines, t, { zoomK = 1, color = 'rgba(120,132,15
     ctx.beginPath();
     for (const line of bucket) {
       for (const part of line.parts) {
-        ctx.moveTo(
-          part[0] * t.m00 + part[1] * t.m01 + t.bx,
-          part[0] * t.m10 + part[1] * t.m11 + t.by,
-        );
+        ctx.moveTo(part[0] * t.a + t.bx, -part[1] * t.a + t.by);
         for (let i = 2; i < part.length; i += 2) {
-          ctx.lineTo(
-            part[i] * t.m00 + part[i + 1] * t.m01 + t.bx,
-            part[i] * t.m10 + part[i + 1] * t.m11 + t.by,
-          );
+          ctx.lineTo(part[i] * t.a + t.bx, -part[i + 1] * t.a + t.by);
         }
       }
     }

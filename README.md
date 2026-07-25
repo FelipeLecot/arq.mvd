@@ -19,17 +19,29 @@ npm run dev          # http://localhost:5173
 
 ## Controls
 
-| Action | Control |
-|---|---|
-| Rotate the plan | Left-drag |
-| Pan | Space + drag, or middle-button drag |
-| Zoom | Wheel |
-| Back to north | `R` |
-| Inspect a parcel | Hover |
+Drag to pan, wheel to zoom, hover to inspect a parcel. North is always up.
 
-Buildings always rise toward the top of the screen, however the plan is turned — the
-extrusion offset stays in screen space while the footprints rotate beneath it. Depth
-ordering is rebuilt when the view turns, since "back" stops meaning "north".
+## Hit-testing
+
+Picking uses a hidden canvas where each parcel is drawn in a unique RGB id colour, so a
+hover is one pixel read regardless of feature count. Two things make that work here:
+
+**It covers the whole silhouette, walls included.** Hit-testing only the roof of an
+extruded parcel means a pointer on the side of a building selects whatever stands behind
+it — and the taller the building, the wider the dead zone.
+
+**Reads reject antialiased pixels.** Canvas antialiases every polygon edge, and an id
+colour is a bit-packed integer, so a blended boundary pixel decodes to a *third* parcel
+unrelated to either neighbour. Measured at city zoom, ~44% of foreground pixels are such
+blends — a naive single-pixel read returns the wrong padrón nearly half the time, which
+is not a subtle bug. A blend is a one-pixel island, so `pick()` reads a small window and
+trusts the centre only when its colour repeats nearby, otherwise taking the nearest
+colour that does. On unambiguous interior points this is correct on 1,830/1,830 samples;
+at a boundary it resolves to one of the two parcels that actually meet there.
+
+Shapes are also stroked in their own id colour, which keeps 8,693 of 9,016 parcels
+selectable at full-city zoom rather than 8,274. The rest are sub-pixel at that scale —
+zoom in to reach them.
 
 ## Every parcel has data
 
@@ -127,16 +139,24 @@ geometry, so restyling never re-parses topology.
 
 ### Performance
 
-Measured at 1440×900, all 9,016 parcels:
+Median redraw at 1440×900, all 9,016 parcels, measured from a fixed view rather than
+after a gesture (an earlier revision of this table was measured mid-gesture and reported
+numbers that were too low):
 
 | | median redraw |
 |---|---|
-| During pan/zoom (flat) | ~19 ms |
-| Settled, extruded, full city | ~132 ms |
-| Extruded, zoomed in (culled) | ~4 ms |
+| Extruded, full city (k=1) | ~200 ms |
+| Flat, full city (k=1) — what a drag shows | ~26 ms |
+| Extruded, zoomed in (culled) | ~5 ms |
 
-Extrusion of the whole city costs more than a frame, so an active gesture draws the flat
-map and the volume returns when the gesture settles.
+Extrusion of the whole city costs well over a frame, so an active gesture draws the flat
+map and the volume returns when the gesture settles. Dragging at city scale is therefore
+~26 ms; releasing costs one ~200 ms frame. Zoomed in, culling makes extrusion cheap and
+it stays live throughout.
+
+The ~200 ms is dominated by wall fills — roughly 9,000 parcels × two shaded wall passes
+plus a roof. Batching walls per parcel took it from ~160 ms to this; per-parcel hairline
+strokes were measured and are not a factor.
 
 The picking buffer is **not** drawn on the render path. It is rebuilt lazily, on the first
 pointer move after the view changes, so its cost lands only when someone actually points

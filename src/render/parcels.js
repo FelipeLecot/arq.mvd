@@ -57,16 +57,9 @@ function drawWalls(ctx, ring, t, ox, oy, shades, solid = null) {
 
   // Project once; both the winding test and the wall loop read these.
   const pts = ensureScratch(n * 2);
-  if (t.upright) {
-    for (let i = 0; i < n; i++) {
-      pts[i * 2] = ring[i * 2] * t.m00 + t.bx;
-      pts[i * 2 + 1] = ring[i * 2 + 1] * t.m11 + t.by;
-    }
-  } else {
-    for (let i = 0; i < n; i++) {
-      pts[i * 2] = ring[i * 2] * t.m00 + ring[i * 2 + 1] * t.m01 + t.bx;
-      pts[i * 2 + 1] = ring[i * 2] * t.m10 + ring[i * 2 + 1] * t.m11 + t.by;
-    }
+  for (let i = 0; i < n; i++) {
+    pts[i * 2] = ring[i * 2] * t.a + t.bx;
+    pts[i * 2 + 1] = -ring[i * 2 + 1] * t.a + t.by;
   }
 
   // Winding, from the shoelace sum in screen space, tells us which normal is outward.
@@ -208,6 +201,10 @@ export function drawParcels(ctx, items, t, opts) {
 export function drawPicking(pickCtx, items, t, opts) {
   const { heights, idColors, order, extrude, exaggeration = 1, width, height } = opts;
 
+  // Wide enough to cover the antialiased fringe on both sides of an edge.
+  pickCtx.lineWidth = 1.5;
+  pickCtx.lineJoin = 'round';
+
   for (let oi = 0; oi < order.length; oi++) {
     const id = order[oi];
     const item = items[id];
@@ -234,25 +231,25 @@ export function drawPicking(pickCtx, items, t, opts) {
       }
     }
     pickCtx.fillStyle = idColor;
+    pickCtx.strokeStyle = idColor;
     pickCtx.beginPath();
     for (const rings of item.polygons) {
       for (const ring of rings) traceRing(pickCtx, ring, t, ox, oy);
     }
     pickCtx.fill('evenodd');
+    // Canvas antialiases every edge, and an id colour is a bit-packed integer: blending
+    // two neighbouring ids yields a THIRD, unrelated parcel. At city zoom that made ~44%
+    // of pixels decode to the wrong padrón. Stroking each shape in its own id colour
+    // lays solid colour over the blended fringe, so a boundary pixel resolves to one of
+    // the two parcels that actually meet there instead of an arbitrary one.
+    pickCtx.stroke();
   }
 }
 
 /**
- * Painter order: back of the scene first.
- *
- * Depends on rotation but not on zoom or pan, which move every parcel together — so it
- * is recomputed when the view turns, not per frame. Screen y for a centroid is
- * proportional to (cx·sinθ − cy·cosθ); sorting ascending puts the far side first. At
- * θ=0 that reduces to north-first.
+ * Painter order: back (north, high Mercator y) first. Computed once — the ordering is in
+ * Mercator space, and zoom and pan move every parcel together.
  */
-export function paintOrder(items, rotation = 0) {
-  const sin = Math.sin(rotation);
-  const cos = Math.cos(rotation);
-  const depth = items.map((it) => it.cx * sin - it.cy * cos);
-  return Array.from(items.keys()).sort((a, b) => depth[a] - depth[b]);
+export function paintOrder(items) {
+  return Array.from(items.keys()).sort((a, b) => items[b].cy - items[a].cy);
 }
