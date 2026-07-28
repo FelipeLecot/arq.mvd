@@ -48,4 +48,24 @@ export const SOURCES = [
     table: 'v_mdg_accesos',
     note: 'Official address points — calle, nro. de puerta, padron.',
   },
+  {
+    // Discovered 2026-07-28: an unprobed table on the same working SHP generator, never
+    // checked by the original research. Citywide, 208,556 parcels, with real POT fields —
+    // ALTURA/FOS/RETIRO at 97.2% coverage — that the original research concluded did not
+    // exist anywhere in CKAN or the SHP generator. AREA_DIFER also carries a ready-made
+    // zone/barrio label ("Pocitos", "Ciudad Vieja", "Centro", ...) on every parcel.
+    id: 'parcelasPot',
+    kind: 'shpgen',
+    table: 'v_mdg_parcelas',
+    note: '208556 parcels citywide — ALTURA, FOS, FIS, RETIRO, AREA_DIFER (legal height envelope + zone name).',
+  },
+  {
+    // Citywide declared-heritage points/polygons (Monumento Histórico Nacional / Bien de
+    // Interés Departamental or Municipal). Sparse (1195 records) but rich where present:
+    // architect and construction date, which the Centro inventory itself does not carry.
+    id: 'bienesPatrimoniales',
+    kind: 'shpgen',
+    table: 'v_pat_mhn_bienespatrimoniales',
+    note: '1195 citywide declared heritage records — AUTORIA, FECHA, DECLARATOR, DIRECCION.',
+  },
 ];

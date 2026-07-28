@@ -23,32 +23,60 @@ function ringToFlat(ring) {
   return flat;
 }
 
+/** Mercator-space bounding box of a set of flat rings, as [minX, minY, maxX, maxY]. */
+function ringsBounds(rings) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const ring of rings) {
+    for (let i = 0; i < ring.length; i += 2) {
+      const x = ring[i];
+      const y = ring[i + 1];
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  return [minX, minY, maxX, maxY];
+}
+
 /**
  * Precompute drawable geometry for every feature.
  * `cy` is the mean Mercator northing, used to sort back-to-front for the painter's
- * algorithm.
+ * algorithm. `bounds` is a static Mercator-space bbox, used to build the spatial index
+ * that keeps per-frame work proportional to what's on screen rather than the full
+ * dataset — see `spatialIndex.js`.
  */
 export function prepareFeatures(features) {
   return features.map((f) => {
     const polygons = extractPolygons(f.geometry).map((rings) => rings.map(ringToFlat));
     let sy = 0;
     let n = 0;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const rings of polygons) {
       const outer = rings[0];
       for (let i = 1; i < outer.length; i += 2) {
         sy += outer[i];
         n++;
       }
+      const [bx0, by0, bx1, by1] = ringsBounds(rings);
+      if (bx0 < minX) minX = bx0;
+      if (by0 < minY) minY = by0;
+      if (bx1 > maxX) maxX = bx1;
+      if (by1 > maxY) maxY = by1;
     }
-    return { polygons, cy: n ? sy / n : 0 };
+    return {
+      polygons,
+      cy: n ? sy / n : 0,
+      bounds: n ? [minX, minY, maxX, maxY] : [0, 0, 0, 0],
+    };
   });
 }
 
 export function prepareLines(features) {
   return features.map((f) => {
     const g = f.geometry;
-    const parts = g.type === 'MultiLineString' ? g.coordinates : [g.coordinates];
-    return { parts: parts.map(ringToFlat), props: f.properties };
+    const parts = (g.type === 'MultiLineString' ? g.coordinates : [g.coordinates]).map(ringToFlat);
+    return { parts, props: f.properties, bounds: ringsBounds(parts) };
   });
 }
 

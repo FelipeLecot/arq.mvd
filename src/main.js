@@ -1,15 +1,50 @@
 import { select, zoom as d3zoom, zoomIdentity } from 'd3';
 import { loadAtlas } from './data.js';
-import { createProjection } from './projection.js';
+import { createProjection, metresToMercator } from './projection.js';
 import { prepareFeatures, prepareLines, screenTransform } from './render/geometry.js';
-import { drawParcels, drawPicking, paintOrder } from './render/parcels.js';
+import { drawParcels, drawPicking } from './render/parcels.js';
 import { drawStreets, drawAmbito } from './render/streets.js';
 import { drawLabels } from './render/labels.js';
+import { buildIndex, queryIds } from './render/spatialIndex.js';
 import { PickingLayer, idToColor } from './picking.js';
 import { ATTRIBUTES } from './scales.js';
 import { renderLegend } from './legend.js';
 import { createHistogram, buildBins } from './histogram.js';
 import { createTitleBlock } from './hover.js';
+
+// A little more than the largest legal envelope in the dataset — the query only needs to
+// not under-include; the precise per-item featureBounds check downstream is the real filter.
+const MAX_ENVELOPE_M = 150;
+const BASE_PAD_PX = 24;
+
+/**
+ * Mercator-space viewport rectangle for the current screen transform, padded so a
+ * feature whose *footprint* sits just outside it — but whose extruded roof leans into
+ * view — still gets queried. The extrusion padding is independent of zoom: the vertical
+ * lift is added in screen space as `metresToMercator(h) * t.a * exaggeration`, so its
+ * Mercator-space equivalent (before the `t.a` multiply) is zoom-invariant.
+ */
+function viewportMercatorBounds(t, width, height, extrude, exaggeration) {
+  const pad = BASE_PAD_PX / t.a + (extrude ? metresToMercator(MAX_ENVELOPE_M) * exaggeration : 0);
+  const minX = -t.bx / t.a - pad;
+  const maxX = (width - t.bx) / t.a + pad;
+  const minY = (t.by - height) / t.a - pad;
+  const maxY = t.by / t.a + pad;
+  return [minX, minY, maxX, maxY];
+}
+
+/** Visible parcel ids, back-to-front by Mercator northing (the painter's algorithm). */
+function visibleParcelOrder(t, width, height, extrude, exaggeration) {
+  const [minX, minY, maxX, maxY] = viewportMercatorBounds(t, width, height, extrude, exaggeration);
+  const ids = queryIds(parcelIndex, minX, minY, maxX, maxY);
+  return ids.sort((a, b) => items[b].cy - items[a].cy);
+}
+
+/** Visible street/ámbito lines — streets don't extrude, so no extra padding needed. */
+function visibleLines(t, width, height) {
+  const [minX, minY, maxX, maxY] = viewportMercatorBounds(t, width, height, false, 1);
+  return queryIds(streetIndex, minX, minY, maxX, maxY).map((id) => lines[id]);
+}
 
 /**
  * Height exaggeration, tapered by zoom.
@@ -45,7 +80,8 @@ const fmt = new Intl.NumberFormat('es-UY');
 let atlas;
 let items;
 let lines;
-let order;
+let parcelIndex;
+let streetIndex;
 let projection;
 let ambitoItems;
 let idColors;
@@ -108,14 +144,21 @@ function redraw() {
   mapCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
   mapCtx.clearRect(0, 0, rect.width, rect.height);
 
-  drawStreets(mapCtx, lines, t, { zoomK: state.transform.k });
+  // Both queries turn "scan the whole dataset" into "scan what's on screen" — see
+  // spatialIndex.js. At Centro's original scale this was unnecessary; at the citywide
+  // scale it's the difference between a redraw costing hundreds of ms and a few.
+  const visLines = visibleLines(t, rect.width, rect.height);
+
+  drawStreets(mapCtx, visLines, t, { zoomK: state.transform.k });
   drawAmbito(mapCtx, ambitoItems, t);
 
-  // Extruding all 9,016 parcels costs far more than a frame at city scale, so an
+  // Extruding all parcels costs far more than a frame at city scale, so an
   // active pan or zoom draws the flat map and the volume returns the moment the
   // gesture settles. Zoomed in, culling makes extrusion cheap enough to keep live.
   const liveExtrude =
     state.extrude && (!state.interacting || state.transform.k > 6);
+  const exaggeration = exaggerationFor(state.transform.k);
+  const order = visibleParcelOrder(t, rect.width, rect.height, liveExtrude, exaggeration);
 
   drawParcels(mapCtx, items, t, {
     colors,
@@ -123,14 +166,14 @@ function redraw() {
     idColors,
     order,
     extrude: liveExtrude,
-    exaggeration: exaggerationFor(state.transform.k),
+    exaggeration,
     selected: state.selected,
     hoveredId: state.hoveredId,
     width: rect.width,
     height: rect.height,
   });
 
-  drawLabels(mapCtx, lines, t, {
+  drawLabels(mapCtx, visLines, t, {
     zoomK: state.transform.k,
     width: rect.width,
     height: rect.height,
@@ -148,13 +191,15 @@ function redraw() {
 /** Rebuild the picking buffer to match the last painted frame. */
 function refreshPicking() {
   const rect = stage.getBoundingClientRect();
+  const exaggeration = exaggerationFor(state.transform.k);
+  const order = visibleParcelOrder(lastTransform, rect.width, rect.height, lastExtrude, exaggeration);
   picking.clear();
   drawPicking(picking.ctx, items, lastTransform, {
     heights,
     idColors,
     order,
     extrude: lastExtrude,
-    exaggeration: exaggerationFor(state.transform.k),
+    exaggeration,
     width: rect.width,
     height: rect.height,
   });
@@ -234,7 +279,8 @@ async function main() {
   items = prepareFeatures(atlas.parcels);
   lines = prepareLines(atlas.vias);
   ambitoItems = prepareFeatures(atlas.ambito.features);
-  order = paintOrder(items);
+  parcelIndex = buildIndex(items);
+  streetIndex = buildIndex(lines);
   idColors = items.map((_, i) => idToColor(i));
   heights = atlas.attrs.altura;
 

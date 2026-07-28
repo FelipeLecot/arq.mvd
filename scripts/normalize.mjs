@@ -67,7 +67,7 @@ export function parseGrado(grado) {
 }
 
 /** Ordered for legends and the histogram: least to most protected, then the non-graded classes. */
-export const GRADE_ORDER = ['G0', 'G1', 'G2', 'G3', 'G4', 'RG', 'SC'];
+export const GRADE_ORDER = ['G0', 'G1', 'G2', 'G3', 'G4', 'RG', 'SC', 'NA'];
 
 export const GRADE_NAMES = {
   G0: 'Grado 0 — Sustitución deseable',
@@ -77,4 +77,21 @@ export const GRADE_NAMES = {
   G4: 'Grado 4 — Protección Integral',
   RG: 'Régimen General',
   SC: 'Sin Catalogar',
+  // Outside any heritage inventory boundary — distinct from SC, which means "surveyed,
+  // no grade assigned". NA parcels were never surveyed at all.
+  NA: 'Fuera del inventario patrimonial',
 };
+
+/**
+ * POT regulatory fields (ALTURA/FOS/FIS/RETIRO on v_mdg_parcelas) carry the same
+ * "string with special-case markers" shape as the Centro inventory's altura — codes like
+ * "ALT.ESP.", "9-12", "CEP", "PAU9" mean a variable or special regime, not a number, and
+ * must stay null rather than become 0 (same trap as parseAltura, different source table).
+ */
+export function parsePotNumeric(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const num = Number(text.replace(',', '.'));
+  return Number.isFinite(num) ? num : null;
+}

@@ -3,6 +3,13 @@
 // Geometry and attributes are emitted to SEPARATE files on purpose. Switching the active
 // attribute or restyling must never re-parse geometry, so the browser loads topology once
 // and swaps columnar attribute arrays freely.
+//
+// Coverage is two-tier: Centro's own inventory (grado_proteccion, 100% coverage, curated
+// geometry) stays authoritative wherever it applies. Every other parcel in the city comes
+// from v_mdg_parcelas — no heritage grade, but a real legal-height/FOS/setback envelope
+// (ALTURA/FOS/RETIRO) that the original research concluded did not exist in open data.
+// Those parcels get grado 'NA' ("fuera del inventario patrimonial") rather than being
+// folded into Centro's 'SC' ("Sin Catalogar") — the two mean different things.
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -11,8 +18,8 @@ import { topology } from 'topojson-server';
 import { DATA_DIR, RAW_DIR } from './paths.mjs';
 import { readBySuffix } from './zip.mjs';
 import { parsePermits } from './permits.mjs';
-import { parsePadron, parseSector, parseAltura, parseGrado, GRADE_ORDER } from './normalize.mjs';
-import { projectGeometry, projectPoint, pointInGeometry, bbox, bboxIntersects, centroid } from './geo.mjs';
+import { parsePadron, parseSector, parseAltura, parseGrado, parsePotNumeric, GRADE_ORDER } from './normalize.mjs';
+import { projectGeometry, bbox } from './geo.mjs';
 
 const QUANTIZATION = 1e5;
 
@@ -29,28 +36,33 @@ async function readShapefileZip(file) {
   return shapefile.read(shp, dbf, { encoding: 'latin1' });
 }
 
+/** Extend a running [minX, minY, maxX, maxY] with a projected geometry, in place. */
+function growBbox(box, geometry) {
+  const [minX, minY, maxX, maxY] = bbox(geometry);
+  if (minX < box[0]) box[0] = minX;
+  if (minY < box[1]) box[1] = minY;
+  if (maxX > box[2]) box[2] = maxX;
+  if (maxY > box[3]) box[3] = maxY;
+}
+
 async function main() {
   await mkdir(DATA_DIR, { recursive: true });
   const stats = {};
 
-  // ---- Ámbito: the Centro boundary, used to clip everything else -----------------
+  // ---- Ámbito: Centro's boundary. Still emitted as an overlay, but no longer used to clip
+  // anything — the atlas is citywide now, so nothing else is filtered against it. -----------
   const ambitoRaw = await readJson('ambito_inventario_patrimonial_centro.geojson');
   const ambito = projectGeometry(ambitoRaw.features[0].geometry);
-  const ambitoBox = bbox(ambito);
 
-  // ---- Permits ------------------------------------------------------------------
+  // ---- Permits, citywide ----------------------------------------------------------------
   const permits = parsePermits(await readFile(join(RAW_DIR, 'permisos_construccion.zip')));
   stats.permitPadrones = permits.size;
 
-  // ---- Address points, indexed by padron ----------------------------------------
-  // Used to give the hover card a street address. Clipped to the ámbito first so we
-  // aren't carrying 200k+ citywide points through the join.
+  // ---- Address points, citywide, indexed by padron ---------------------------------------
   const accesos = await readShapefileZip('v_mdg_accesos.zip');
   const addressByPadron = new Map();
   for (const f of accesos.features) {
     if (!f.geometry) continue;
-    const p = projectPoint(f.geometry.coordinates);
-    if (p[0] < ambitoBox[0] || p[0] > ambitoBox[2] || p[1] < ambitoBox[1] || p[1] > ambitoBox[3]) continue;
     const props = f.properties || {};
     const padron = Number.parseInt(props.PADRON ?? props.padron, 10);
     if (!Number.isFinite(padron) || addressByPadron.has(padron)) continue;
@@ -58,11 +70,52 @@ async function main() {
     const nro = String(props.PUERTA ?? props.NRO_PUERTA ?? props.NRO ?? '').trim();
     if (calle) addressByPadron.set(padron, nro ? `${calle} ${nro}` : calle);
   }
-  stats.addressesInAmbito = addressByPadron.size;
+  stats.addresses = addressByPadron.size;
 
-  // ---- Parcels: the core layer ---------------------------------------------------
+  // ---- POT parcels (v_mdg_parcelas): citywide legal-height envelope + zone name ----------
+  // Read once into two shapes: an attribute lookup (used to enrich EVERY parcel, including
+  // Centro's) and a feature list (used only for parcels Centro's own inventory doesn't cover).
+  const potShp = await readShapefileZip('v_mdg_parcelas.zip');
+  const potAttrsByPadron = new Map();
+  const potFeatures = [];
+  for (const f of potShp.features) {
+    if (!f.geometry) continue;
+    const props = f.properties || {};
+    const padron = Number.parseInt(props.PADRON, 10);
+    const entry = {
+      altura: parsePotNumeric(props.ALTURA),
+      areaDifer: String(props.AREA_DIFER ?? '').trim() || null,
+    };
+    if (Number.isFinite(padron) && !potAttrsByPadron.has(padron)) potAttrsByPadron.set(padron, entry);
+    potFeatures.push({ padron: Number.isFinite(padron) ? padron : null, geometry: f.geometry, ...entry });
+  }
+  stats.potParcels = potFeatures.length;
+
+  // ---- Citywide declared heritage landmarks (v_pat_mhn_bienespatrimoniales) --------------
+  // Sparse (1195 records) but carries architect and construction date, which Centro's own
+  // inventory does not. Indexed by padron; first match wins on duplicates.
+  const bienesShp = await readShapefileZip('v_pat_mhn_bienespatrimoniales.zip');
+  const heritageByPadron = new Map();
+  for (const f of bienesShp.features) {
+    const props = f.properties || {};
+    const padron = Number.parseInt(props.PADRON, 10);
+    if (!Number.isFinite(padron) || heritageByPadron.has(padron)) continue;
+    const clean = (v) => {
+      const text = String(v ?? '').trim();
+      return text && text !== '-' ? text : null;
+    };
+    heritageByPadron.set(padron, {
+      name: clean(props.IDENTIFICA),
+      architect: clean(props.AUTORIA),
+      builtDate: clean(props.FECHA),
+      declaration: clean(props.DECLARATOR),
+    });
+  }
+  stats.heritageRecords = heritageByPadron.size;
+
+  // ---- Parcels: Centro's own inventory first (curated geometry, heritage grade) ----------
   const invRaw = await readJson('inventario_patrimonial_centro.geojson');
-  stats.sourceFeatures = invRaw.features.length;
+  stats.centroSourceFeatures = invRaw.features.length;
 
   const parcelFeatures = [];
   const attrs = {
@@ -76,61 +129,97 @@ async function main() {
     address: [],
     destino: [],
     gradoDetail: [],
+    barrio: [],
+    heritageName: [],
+    architect: [],
+    builtDate: [],
+    heritageDeclaration: [],
   };
 
   let alturaEspecial = 0;
   let padronParseFailures = 0;
   let permitMatches = 0;
+  let nextId = 0;
+  const dataBbox = [Infinity, Infinity, -Infinity, -Infinity];
 
-  invRaw.features.forEach((f, i) => {
-    if (!f.geometry) return;
+  function pushParcel({ geometry, padron, sector, grado, gradoDetail, altura }) {
+    const id = nextId++;
+    const projected = projectGeometry(geometry);
+    growBbox(dataBbox, projected);
+    parcelFeatures.push({ type: 'Feature', id, geometry: projected, properties: { id } });
+
+    const permit = padron !== null ? permits.get(padron) : null;
+    if (permit) permitMatches++;
+    const heritage = padron !== null ? heritageByPadron.get(padron) : null;
+    const pot = padron !== null ? potAttrsByPadron.get(padron) : null;
+
+    attrs.id.push(id);
+    attrs.padron.push(padron);
+    attrs.sector.push(sector);
+    attrs.grado.push(grado);
+    attrs.altura.push(altura);
+    attrs.permits.push(permit ? permit.count : 0);
+    attrs.lastPermitYear.push(permit ? permit.lastYear : null);
+    attrs.address.push(padron !== null ? addressByPadron.get(padron) ?? null : null);
+    attrs.destino.push(permit ? permit.destino : null);
+    attrs.gradoDetail.push(gradoDetail);
+    attrs.barrio.push(pot ? pot.areaDifer : null);
+    attrs.heritageName.push(heritage ? heritage.name : null);
+    attrs.architect.push(heritage ? heritage.architect : null);
+    attrs.builtDate.push(heritage ? heritage.builtDate : null);
+    attrs.heritageDeclaration.push(heritage ? heritage.declaration : null);
+  }
+
+  const centroPadrones = new Set();
+  for (const f of invRaw.features) {
+    if (!f.geometry) continue;
     const props = f.properties || {};
     const padron = parsePadron(props.padron_sector);
     const grado = parseGrado(props.grado_proteccion);
     const altura = parseAltura(props.altura);
 
     if (padron === null) padronParseFailures++;
+    else centroPadrones.add(padron);
     if (altura === null) alturaEspecial++;
 
-    const permit = padron !== null ? permits.get(padron) : null;
-    if (permit) permitMatches++;
-
-    const id = i;
-    parcelFeatures.push({
-      type: 'Feature',
-      id,
-      geometry: projectGeometry(f.geometry),
-      properties: { id },
+    pushParcel({
+      geometry: f.geometry,
+      padron,
+      sector: parseSector(props.padron_sector),
+      grado: grado.code,
+      gradoDetail: grado.detail,
+      altura,
     });
+  }
+  stats.centroParcels = nextId;
+  stats.centroAlturaEspecial = alturaEspecial;
+  stats.centroPadronParseFailures = padronParseFailures;
 
-    attrs.id.push(id);
-    attrs.padron.push(padron);
-    attrs.sector.push(parseSector(props.padron_sector));
-    attrs.grado.push(grado.code);
-    attrs.altura.push(altura);
-    attrs.permits.push(permit ? permit.count : 0);
-    attrs.lastPermitYear.push(permit ? permit.lastYear : null);
-    attrs.address.push(padron !== null ? addressByPadron.get(padron) ?? null : null);
-    attrs.destino.push(permit ? permit.destino : null);
-    attrs.gradoDetail.push(grado.detail);
-  });
+  // ---- Citywide parcels: everything v_mdg_parcelas covers that Centro's inventory doesn't
+  for (const pf of potFeatures) {
+    if (pf.padron !== null && centroPadrones.has(pf.padron)) continue; // Centro's version wins.
+    pushParcel({
+      geometry: pf.geometry,
+      padron: pf.padron,
+      sector: null,
+      grado: 'NA',
+      gradoDetail: null,
+      altura: pf.altura,
+    });
+  }
 
-  stats.parcels = parcelFeatures.length;
-  stats.alturaEspecial = alturaEspecial;
-  stats.padronParseFailures = padronParseFailures;
+  stats.parcels = nextId;
   stats.parcelsWithPermits = permitMatches;
   stats.parcelsWithAddress = attrs.address.filter(Boolean).length;
+  stats.parcelsWithHeritageDetail = attrs.architect.filter(Boolean).length;
 
-  // ---- Streets, clipped to the ámbito --------------------------------------------
+  // ---- Streets, citywide ------------------------------------------------------------------
   // v_sig_vias (not v_mdg_vias) because only it carries TIPO, which drives line weight.
   const vias = await readShapefileZip('v_sig_vias.zip');
   const viaFeatures = [];
   for (const f of vias.features) {
     if (!f.geometry) continue;
     const geom = projectGeometry(f.geometry);
-    if (!bboxIntersects(bbox(geom), ambitoBox)) continue;
-    const c = centroid(geom);
-    if (!c || !pointInGeometry(c, ambito)) continue;
     const props = f.properties || {};
     viaFeatures.push({
       type: 'Feature',
@@ -141,7 +230,7 @@ async function main() {
       },
     });
   }
-  stats.streetsInAmbito = viaFeatures.length;
+  stats.streets = viaFeatures.length;
   stats.streetTypes = [...new Set(viaFeatures.map((f) => f.properties.tipo))].filter(Boolean);
 
   // ---- Emit ----------------------------------------------------------------------
@@ -162,16 +251,20 @@ async function main() {
 
   const meta = {
     generated: new Date().toISOString(),
-    bbox: bbox(ambito),
-    counts: { parcels: stats.parcels, streets: stats.streetsInAmbito },
+    bbox: dataBbox,
+    counts: { parcels: stats.parcels, streets: stats.streets },
     gradeCounts,
     gradeOrder: GRADE_ORDER,
     coverage: {
       // Surfaced in the UI so the atlas states its own limits rather than implying
-      // citywide or complete data.
+      // complete data. Citywide now, so these read lower than the Centro-only figures did —
+      // that is real signal (permits/addresses are far sparser outside Centro), not a bug.
       permitPct: +((100 * stats.parcelsWithPermits) / stats.parcels).toFixed(1),
       addressPct: +((100 * stats.parcelsWithAddress) / stats.parcels).toFixed(1),
-      alturaEspecial,
+      heritageDetailPct: +((100 * stats.parcelsWithHeritageDetail) / stats.parcels).toFixed(1),
+      alturaEspecial: attrs.altura.filter((a) => a === null).length,
+      centroParcels: stats.centroParcels,
+      centroAlturaEspecial: stats.centroAlturaEspecial,
     },
   };
 

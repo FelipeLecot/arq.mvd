@@ -245,11 +245,3 @@ export function drawPicking(pickCtx, items, t, opts) {
     pickCtx.stroke();
   }
 }
-
-/**
- * Painter order: back (north, high Mercator y) first. Computed once — the ordering is in
- * Mercator space, and zoom and pan move every parcel together.
- */
-export function paintOrder(items) {
-  return Array.from(items.keys()).sort((a, b) => items[b].cy - items[a].cy);
-}

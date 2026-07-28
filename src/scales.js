@@ -20,9 +20,13 @@ export const GRADE_COLORS = {
   // read as missing data, which it is not (it is 43% of Centro).
   RG: '#414E61',
   SC: '#4A4750',
+  // Outside any heritage inventory boundary (citywide parcels sourced only from the POT
+  // envelope). Distinct from SC — that means "surveyed, no grade"; this means "never
+  // surveyed" — so it gets its own neutral rather than being folded into SC's.
+  NA: '#4D473F',
 };
 
-export const GRADE_ORDER = ['G0', 'G1', 'G2', 'G3', 'G4', 'RG', 'SC'];
+export const GRADE_ORDER = ['G0', 'G1', 'G2', 'G3', 'G4', 'RG', 'SC', 'NA'];
 
 export const GRADE_LABELS = {
   G0: 'Grado 0 · Sustitución deseable',
@@ -32,6 +36,7 @@ export const GRADE_LABELS = {
   G4: 'Grado 4 · Protección integral',
   RG: 'Régimen general',
   SC: 'Sin catalogar',
+  NA: 'Fuera del inventario patrimonial',
 };
 
 /** Short forms for the legend, where a wrapped row would push rows out of the rail. */
@@ -43,6 +48,7 @@ export const GRADE_LABELS_SHORT = {
   G4: 'G4 · Protección integral',
   RG: 'Régimen general',
   SC: 'Sin catalogar',
+  NA: 'Fuera del inventario',
 };
 
 const ALTURA_STEPS = ['#33506B', '#4A7194', '#6E9CBE', '#A3C6DE', '#DCE9F2'];
