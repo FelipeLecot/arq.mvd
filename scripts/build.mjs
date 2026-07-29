@@ -19,6 +19,7 @@ import { DATA_DIR, RAW_DIR } from './paths.mjs';
 import { readBySuffix } from './zip.mjs';
 import { parsePermits } from './permits.mjs';
 import { parsePadron, parseSector, parseAltura, parseGrado, parsePotNumeric, GRADE_ORDER } from './normalize.mjs';
+import { buildBlocks } from './blocks.mjs';
 import { projectGeometry, bbox } from './geo.mjs';
 
 const QUANTIZATION = 1e5;
@@ -213,6 +214,11 @@ async function main() {
   stats.parcelsWithAddress = attrs.address.filter(Boolean).length;
   stats.parcelsWithHeritageDetail = attrs.architect.filter(Boolean).length;
 
+  // ---- Blocks: merge touching parcels into city-block geometry for the zoomed-out LOD --
+  const { blockFeatures, blockAttrs, unionFailures } = buildBlocks(parcelFeatures, attrs);
+  stats.blocks = blockFeatures.length;
+  stats.blockUnionFailures = unionFailures;
+
   // ---- Streets, citywide ------------------------------------------------------------------
   // v_sig_vias (not v_mdg_vias) because only it carries TIPO, which drives line weight.
   const vias = await readShapefileZip('v_sig_vias.zip');
@@ -245,6 +251,10 @@ async function main() {
     },
     QUANTIZATION,
   );
+  const blocksTopo = topology(
+    { blocks: { type: 'FeatureCollection', features: blockFeatures } },
+    QUANTIZATION,
+  );
 
   const gradeCounts = {};
   for (const g of attrs.grado) gradeCounts[g] = (gradeCounts[g] || 0) + 1;
@@ -252,7 +262,7 @@ async function main() {
   const meta = {
     generated: new Date().toISOString(),
     bbox: dataBbox,
-    counts: { parcels: stats.parcels, streets: stats.streets },
+    counts: { parcels: stats.parcels, streets: stats.streets, blocks: stats.blocks },
     gradeCounts,
     gradeOrder: GRADE_ORDER,
     coverage: {
@@ -270,7 +280,8 @@ async function main() {
 
   await writeFile(join(DATA_DIR, 'centro.topo.json'), JSON.stringify(parcelsTopo));
   await writeFile(join(DATA_DIR, 'vias.topo.json'), JSON.stringify(viasTopo));
-  await writeFile(join(DATA_DIR, 'attrs.json'), JSON.stringify({ meta, attrs }));
+  await writeFile(join(DATA_DIR, 'blocks.topo.json'), JSON.stringify(blocksTopo));
+  await writeFile(join(DATA_DIR, 'attrs.json'), JSON.stringify({ meta, attrs, blockAttrs }));
 
   console.log('Build complete:');
   for (const [k, v] of Object.entries(stats)) {
