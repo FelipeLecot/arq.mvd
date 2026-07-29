@@ -17,6 +17,12 @@ import { createTitleBlock } from './hover.js';
 const MAX_ENVELOPE_M = 150;
 const BASE_PAD_PX = 24;
 
+// Centro's original 9,016-parcel viewport was already cheap enough without an LOD swap.
+// Below the zoom scale that fit was designed for, the viewport can span far more of the
+// citywide dataset, so draw merged blocks instead of individual parcels. Tune by watching
+// window.__atlas.perf.lastRedrawMs while panned into a dense area and zoomed to different scales.
+const BLOCK_LOD_MAX_K = 1;
+
 /**
  * Mercator-space viewport rectangle for the current screen transform, padded so a
  * feature whose *footprint* sits just outside it — but whose extruded roof leans into
@@ -46,6 +52,13 @@ function visibleLines(t, width, height) {
   return queryIds(streetIndex, minX, minY, maxX, maxY).map((id) => lines[id]);
 }
 
+/** Visible block ids, back-to-front — blocks never extrude, so no extra padding needed. */
+function visibleBlockOrder(t, width, height) {
+  const [minX, minY, maxX, maxY] = viewportMercatorBounds(t, width, height, false, 1);
+  const ids = queryIds(blockIndex, minX, minY, maxX, maxY);
+  return ids.sort((a, b) => blockItems[b].cy - blockItems[a].cy);
+}
+
 /**
  * Height exaggeration, tapered by zoom.
  *
@@ -62,6 +75,7 @@ const state = {
   extrude: true,
   transform: zoomIdentity,
   hoveredId: null,
+  hoveredLod: null,
   selected: null,
   interacting: false,
   needsRedraw: true,
@@ -89,10 +103,16 @@ let colors;
 let heights;
 let histogram;
 let dpr = 1;
+let blockItems;
+let blockIndex;
+let blockIdColors;
+let blockColors;
+let blockHeights;
 // Transform and extrusion mode of the last painted frame, so the picking buffer can be
 // rebuilt later to match exactly what is on screen.
 let lastTransform = null;
 let lastExtrude = false;
+let lastLod = 'parcel';
 
 function sizeCanvases() {
   const rect = stage.getBoundingClientRect();
@@ -108,12 +128,18 @@ function sizeCanvases() {
   state.needsRedraw = true;
 }
 
-/** Recompute the per-parcel colour array. Geometry is untouched. */
+/** Recompute the per-parcel and per-block colour arrays. Geometry is untouched. */
 function applyAttribute() {
   const spec = ATTRIBUTES[state.attr];
   const values = valuesFor(state.attr);
   colors = values.map((v) => spec.color(v));
 
+  const blockVals = blockValuesFor(state.attr);
+  blockColors = blockVals.map((v) => spec.color(v));
+
+  // Legend and histogram deliberately stay parcel-level regardless of the active LOD —
+  // they describe "the dataset," and switching their source per zoom would make the same
+  // colour mean a different statistic depending on how far zoomed out you are.
   renderLegend(
     document.getElementById('legend-title'),
     document.getElementById('legend-items'),
@@ -136,9 +162,16 @@ function valuesFor(attr) {
   return atlas.attrs.permits;
 }
 
+function blockValuesFor(attr) {
+  if (attr === 'grado') return atlas.blockAttrs.grado;
+  if (attr === 'altura') return atlas.blockAttrs.altura;
+  return atlas.blockAttrs.permits;
+}
+
 function redraw() {
   const rect = stage.getBoundingClientRect();
   const t = screenTransform(projection, state.transform);
+  const lod = state.transform.k < BLOCK_LOD_MAX_K ? 'block' : 'parcel';
 
   mapCtx.save();
   mapCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -152,26 +185,45 @@ function redraw() {
   drawStreets(mapCtx, visLines, t, { zoomK: state.transform.k });
   drawAmbito(mapCtx, ambitoItems, t);
 
-  // Extruding all parcels costs far more than a frame at city scale, so an
-  // active pan or zoom draws the flat map and the volume returns the moment the
-  // gesture settles. Zoomed in, culling makes extrusion cheap enough to keep live.
-  const liveExtrude =
-    state.extrude && (!state.interacting || state.transform.k > 6);
   const exaggeration = exaggerationFor(state.transform.k);
-  const order = visibleParcelOrder(t, rect.width, rect.height, liveExtrude, exaggeration);
 
-  drawParcels(mapCtx, items, t, {
-    colors,
-    heights,
-    idColors,
-    order,
-    extrude: liveExtrude,
-    exaggeration,
-    selected: state.selected,
-    hoveredId: state.hoveredId,
-    width: rect.width,
-    height: rect.height,
-  });
+  if (lod === 'block') {
+    // Blocks always render flat: an averaged height smeared across many different real
+    // buildings and drawn as one solid volume would misrepresent the data the same way
+    // un-exaggerated height would when zoomed in.
+    const order = visibleBlockOrder(t, rect.width, rect.height);
+    drawParcels(mapCtx, blockItems, t, {
+      colors: blockColors,
+      heights: blockHeights,
+      idColors: blockIdColors,
+      order,
+      extrude: false,
+      exaggeration,
+      selected: null,
+      hoveredId: state.hoveredLod === 'block' ? state.hoveredId : null,
+      width: rect.width,
+      height: rect.height,
+    });
+  } else {
+    // Extruding all parcels costs far more than a frame at city scale, so an
+    // active pan or zoom draws the flat map and the volume returns the moment the
+    // gesture settles. Zoomed in, culling makes extrusion cheap enough to keep live.
+    const liveExtrude = state.extrude && (!state.interacting || state.transform.k > 6);
+    const order = visibleParcelOrder(t, rect.width, rect.height, liveExtrude, exaggeration);
+    drawParcels(mapCtx, items, t, {
+      colors,
+      heights,
+      idColors,
+      order,
+      extrude: liveExtrude,
+      exaggeration,
+      selected: state.selected,
+      hoveredId: state.hoveredLod === 'parcel' ? state.hoveredId : null,
+      width: rect.width,
+      height: rect.height,
+    });
+    lastExtrude = liveExtrude;
+  }
 
   drawLabels(mapCtx, visLines, t, {
     zoomK: state.transform.k,
@@ -184,7 +236,7 @@ function redraw() {
   // The picking buffer now disagrees with the screen. It is rebuilt on demand rather
   // than here, so the cost lands only when someone actually points at something.
   lastTransform = t;
-  lastExtrude = liveExtrude;
+  lastLod = lod;
   state.pickDirty = true;
 }
 
@@ -192,17 +244,32 @@ function redraw() {
 function refreshPicking() {
   const rect = stage.getBoundingClientRect();
   const exaggeration = exaggerationFor(state.transform.k);
-  const order = visibleParcelOrder(lastTransform, rect.width, rect.height, lastExtrude, exaggeration);
   picking.clear();
-  drawPicking(picking.ctx, items, lastTransform, {
-    heights,
-    idColors,
-    order,
-    extrude: lastExtrude,
-    exaggeration,
-    width: rect.width,
-    height: rect.height,
-  });
+
+  if (lastLod === 'block') {
+    const order = visibleBlockOrder(lastTransform, rect.width, rect.height);
+    drawPicking(picking.ctx, blockItems, lastTransform, {
+      heights: blockHeights,
+      idColors: blockIdColors,
+      order,
+      extrude: false,
+      exaggeration,
+      width: rect.width,
+      height: rect.height,
+    });
+  } else {
+    const order = visibleParcelOrder(lastTransform, rect.width, rect.height, lastExtrude, exaggeration);
+    drawPicking(picking.ctx, items, lastTransform, {
+      heights,
+      idColors,
+      order,
+      extrude: lastExtrude,
+      exaggeration,
+      width: rect.width,
+      height: rect.height,
+    });
+  }
+
   state.pickDirty = false;
 }
 
@@ -229,13 +296,17 @@ function onPointerMove(event) {
   const rect = mapCanvas.getBoundingClientRect();
   const id = picking.pick(event.clientX - rect.left, event.clientY - rect.top);
 
-  if (id === state.hoveredId) return;
+  if (id === state.hoveredId && state.hoveredLod === lastLod) return;
   state.hoveredId = id;
+  state.hoveredLod = lastLod;
   state.needsRedraw = true;
 
   if (id == null) {
     titleBlock.hide();
     hint.style.opacity = '1';
+  } else if (lastLod === 'block') {
+    titleBlock.showBlock(id, atlas.blockAttrs);
+    hint.style.opacity = '0';
   } else {
     titleBlock.show(id, atlas.attrs);
     hint.style.opacity = '0';
@@ -283,6 +354,11 @@ async function main() {
   streetIndex = buildIndex(lines);
   idColors = items.map((_, i) => idToColor(i));
   heights = atlas.attrs.altura;
+
+  blockItems = prepareFeatures(atlas.blocks);
+  blockIndex = buildIndex(blockItems);
+  blockIdColors = blockItems.map((_, i) => idToColor(i));
+  blockHeights = atlas.blockAttrs.altura;
 
   histogram = createHistogram(document.getElementById('hist'), {
     onSelect(bins) {
