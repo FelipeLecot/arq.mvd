@@ -69,3 +69,26 @@ test('geometry is projected into Web Mercator and spans the full city, not just 
   // Citywide should be an order of magnitude wider than Centro's ~3.3 km alone.
   assert.ok(maxX - minX > 20000, `width too small for a citywide build: ${maxX - minX}`);
 });
+
+test('blocks: touching parcels merge into far fewer city-block shapes', { skip }, () => {
+  const { meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  // Measured on the 2026-07-29 build; a large deviation means the adjacency tolerance or
+  // the underlying parcel geometry changed.
+  assert.equal(meta.counts.blocks, 8360);
+  // Sanity bound rather than an exact figure, so minor upstream data wobble doesn't break
+  // this test the way an exact-equality assertion would.
+  assert.ok(
+    meta.counts.blocks < meta.counts.parcels / 3,
+    `expected at least a 3x reduction from parcels to blocks, got ${meta.counts.parcels} -> ${meta.counts.blocks}`,
+  );
+});
+
+test('blocks: attribute arrays are index-aligned and fully populated', { skip }, () => {
+  const { blockAttrs, meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const n = meta.counts.blocks;
+  for (const key of ['id', 'parcelIds', 'parcelCount', 'grado', 'gradoSharePct', 'altura', 'permits']) {
+    assert.equal(blockAttrs[key].length, n, `blockAttrs.${key} length mismatch`);
+  }
+  assert.equal(blockAttrs.parcelCount.filter((c) => c < 1).length, 0, 'every block has at least one parcel');
+  assert.equal(blockAttrs.grado.filter((g) => g == null).length, 0, 'every block has a dominant grado');
+});
