@@ -15,6 +15,8 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as shapefile from 'shapefile';
 import { topology } from 'topojson-server';
+import { presimplify, simplify } from 'topojson-simplify';
+import { quantize } from 'topojson-client';
 import { DATA_DIR, RAW_DIR } from './paths.mjs';
 import { readBySuffix } from './zip.mjs';
 import { parsePermits } from './permits.mjs';
@@ -251,10 +253,19 @@ async function main() {
     },
     QUANTIZATION,
   );
-  const blocksTopo = topology(
+  const blocksTopoRaw = topology(
     { blocks: { type: 'FeatureCollection', features: blockFeatures } },
     QUANTIZATION,
   );
+  // Blocks are only ever shown at k < BLOCK_LOD_MAX_K (src/main.js), where the viewport
+  // spans roughly Centro's original ~3.3 km extent over a canvas a few hundred px wide —
+  // on the order of 10 m/pixel. minWeight=100 (~10m x 10m) discards vertices whose
+  // removal would distort the outline by less than about a pixel at that scale.
+  // presimplify() decodes the quantized arcs to absolute coordinates to compute correct
+  // simplification weights, and its output (like simplify()'s) has no `transform` — so
+  // without re-quantizing, the emitted arcs would be full-precision floats instead of the
+  // compact deltas every other file uses, growing the payload instead of shrinking it.
+  const blocksTopo = quantize(simplify(presimplify(blocksTopoRaw), 100), QUANTIZATION);
 
   const gradeCounts = {};
   for (const g of attrs.grado) gradeCounts[g] = (gradeCounts[g] || 0) + 1;
