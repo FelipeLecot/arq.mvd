@@ -207,6 +207,7 @@ export function findAdjacentGroups(features, tolerance = 0.5) {
 }
 
 function toClipGeom(geometry) {
+  if (!geometry) return null;
   if (geometry.type === 'Polygon') return geometry.coordinates;
   if (geometry.type === 'MultiPolygon') return geometry.coordinates;
   return null;

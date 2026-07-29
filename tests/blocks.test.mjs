@@ -94,3 +94,8 @@ test('unionGroup returns null on unusable input rather than throwing', () => {
     null,
   );
 });
+
+test('unionGroup returns null on null/undefined geometry entry rather than throwing', () => {
+  assert.equal(unionGroup([null, square(0, 0, 1, 1)]), null);
+  assert.equal(unionGroup([undefined, square(0, 0, 1, 1)]), null);
+});
