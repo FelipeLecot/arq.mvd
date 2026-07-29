@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { polygonArea, mean, meanOrNull, dominantGrado } from '../scripts/blocks.mjs';
+import { polygonArea, mean, meanOrNull, dominantGrado, findAdjacentGroups } from '../scripts/blocks.mjs';
 
 function square(x0, y0, x1, y1) {
   return {
@@ -42,4 +42,37 @@ test('dominantGrado breaks an exact area tie in favor of the more protective gra
   ]);
   assert.equal(result.code, 'G4');
   assert.equal(result.sharePct, 50);
+});
+
+test('findAdjacentGroups merges four touching squares into one group', () => {
+  const features = [
+    { geometry: square(0, 0, 1, 1) },
+    { geometry: square(1, 0, 2, 1) },
+    { geometry: square(0, 1, 1, 2) },
+    { geometry: square(1, 1, 2, 2) },
+    { geometry: square(100, 100, 101, 101) }, // far away, its own group
+  ];
+  const groups = findAdjacentGroups(features, 0.01);
+  const sizes = groups.map((g) => g.length).sort((a, b) => a - b);
+  assert.deepEqual(sizes, [1, 4]);
+});
+
+test('findAdjacentGroups keeps parcels separated by more than tolerance apart', () => {
+  const features = [
+    { geometry: square(0, 0, 1, 1) },
+    { geometry: square(1.2, 0, 2.2, 1) }, // 0.2 gap, wider than the 0.05 tolerance
+  ];
+  const groups = findAdjacentGroups(features, 0.05);
+  assert.equal(groups.length, 2);
+});
+
+test('findAdjacentGroups covers every input index exactly once', () => {
+  const features = [
+    { geometry: square(0, 0, 1, 1) },
+    { geometry: square(1, 0, 2, 1) },
+    { geometry: square(10, 10, 11, 11) },
+  ];
+  const groups = findAdjacentGroups(features, 0.01);
+  const covered = groups.flat().sort((a, b) => a - b);
+  assert.deepEqual(covered, [0, 1, 2]);
 });
