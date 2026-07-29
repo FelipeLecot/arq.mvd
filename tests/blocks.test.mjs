@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { polygonArea, mean, meanOrNull, dominantGrado, findAdjacentGroups, unionGroup, buildBlocks } from '../scripts/blocks.mjs';
+import { polygonArea, mean, meanOrNull, dominantGrado, findAdjacentGroups, unionGroup, buildBlocks, aggregateGroups } from '../scripts/blocks.mjs';
 
 function square(x0, y0, x1, y1) {
   return {
@@ -126,15 +126,49 @@ test('buildBlocks aggregates a small synthetic parcel set into blocks', () => {
   const pairBlock = bySize[1].id;
 
   assert.equal(blockAttrs.parcelCount[soloBlock], 1);
+  assert.equal(blockAttrs.id[soloBlock], soloBlock);
   assert.equal(blockAttrs.grado[soloBlock], 'G4');
   assert.equal(blockAttrs.altura[soloBlock], 8);
   assert.equal(blockAttrs.permits[soloBlock], 5);
   assert.deepEqual(blockAttrs.parcelIds[soloBlock], [2]);
 
   assert.equal(blockAttrs.parcelCount[pairBlock], 2);
+  assert.equal(blockAttrs.id[pairBlock], pairBlock);
   // Equal-area G2/NA split: G2 is more protective, wins the tie.
   assert.equal(blockAttrs.grado[pairBlock], 'G2');
+  assert.equal(blockAttrs.gradoSharePct[pairBlock], 50);
   assert.equal(blockAttrs.altura[pairBlock], 12); // mean of [12, null], skipping the null
   assert.equal(blockAttrs.permits[pairBlock], 1); // mean of [2, 0]
   assert.deepEqual(blockAttrs.parcelIds[pairBlock].sort(), [0, 1]);
+});
+
+test('aggregateGroups falls back to MultiPolygon when unionGroup fails', () => {
+  // Pass a group containing a valid Polygon and an invalid geometry type (Point).
+  // unionGroup will return null because toClipGeom(Point) = null.
+  // This tests that the fallback creates a MultiPolygon with both members' coordinates.
+  const parcelFeatures = [
+    { geometry: square(0, 0, 1, 1) },
+    { geometry: { type: 'Point', coordinates: [0.5, 0.5] } }, // non-Polygon
+  ];
+  const attrs = {
+    grado: ['G2', 'NA'],
+    altura: [12, 8],
+    permits: [2, 1],
+  };
+
+  // Manually construct a group containing both parcels
+  const groups = new Map();
+  groups.set(0, [0, 1]);
+
+  const { blockFeatures, blockAttrs, unionFailures } = aggregateGroups(groups, parcelFeatures, attrs);
+
+  assert.equal(unionFailures, 1);
+  assert.equal(blockFeatures.length, 1);
+  assert.equal(blockFeatures[0].geometry.type, 'MultiPolygon');
+  assert.equal(blockAttrs.parcelCount[0], 2);
+  assert.deepEqual(blockAttrs.parcelIds[0], [0, 1]);
+  // Verify the fallback MultiPolygon handles the aggregation correctly.
+  // Point has area 0, Polygon has area 1, so G2 wins with 100% share.
+  assert.equal(blockAttrs.grado[0], 'G2');
+  assert.equal(blockAttrs.gradoSharePct[0], 100);
 });

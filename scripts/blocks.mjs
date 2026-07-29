@@ -235,9 +235,11 @@ export function unionGroup(geometries) {
   }
 }
 
-export function buildBlocks(parcelFeatures, attrs, { tolerance = 0.5 } = {}) {
-  const groups = findAdjacentGroups(parcelFeatures, tolerance);
-
+/**
+ * Aggregates a precomputed set of groups (each group is a list of parcel indices)
+ * into block features and attributes. Testable independently of findAdjacentGroups.
+ */
+export function aggregateGroups(groups, parcelFeatures, attrs) {
   const blockFeatures = [];
   const blockAttrs = {
     id: [],
@@ -282,4 +284,9 @@ export function buildBlocks(parcelFeatures, attrs, { tolerance = 0.5 } = {}) {
   });
 
   return { blockFeatures, blockAttrs, unionFailures };
+}
+
+export function buildBlocks(parcelFeatures, attrs, { tolerance = 0.5 } = {}) {
+  const groups = findAdjacentGroups(parcelFeatures, tolerance);
+  return aggregateGroups(groups, parcelFeatures, attrs);
 }
