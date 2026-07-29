@@ -7,6 +7,7 @@
 
 import RBush from 'rbush';
 import { bbox } from './geo.mjs';
+import polygonClipping from 'polygon-clipping';
 
 function ringArea(ring) {
   let sum = 0;
@@ -203,4 +204,32 @@ export function findAdjacentGroups(features, tolerance = 0.5) {
     groups.get(root).push(id);
   }
   return [...groups.values()];
+}
+
+function toClipGeom(geometry) {
+  if (geometry.type === 'Polygon') return geometry.coordinates;
+  if (geometry.type === 'MultiPolygon') return geometry.coordinates;
+  return null;
+}
+
+/**
+ * polygon-clipping's union always returns a MultiPolygon-shaped coordinate array (an
+ * array of polygons, even when there's only one) — collapse that to a plain Polygon when
+ * possible so downstream code isn't forced through the MultiPolygon branch unnecessarily.
+ */
+export function unionGroup(geometries) {
+  if (geometries.length === 1) return geometries[0];
+
+  const clipGeoms = geometries.map(toClipGeom);
+  if (clipGeoms.some((g) => g === null)) return null;
+
+  try {
+    const result = polygonClipping.union(clipGeoms[0], ...clipGeoms.slice(1));
+    if (!result || result.length === 0) return null;
+    return result.length === 1
+      ? { type: 'Polygon', coordinates: result[0] }
+      : { type: 'MultiPolygon', coordinates: result };
+  } catch {
+    return null;
+  }
 }

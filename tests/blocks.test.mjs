@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { polygonArea, mean, meanOrNull, dominantGrado, findAdjacentGroups } from '../scripts/blocks.mjs';
+import { polygonArea, mean, meanOrNull, dominantGrado, findAdjacentGroups, unionGroup } from '../scripts/blocks.mjs';
 
 function square(x0, y0, x1, y1) {
   return {
@@ -75,4 +75,22 @@ test('findAdjacentGroups covers every input index exactly once', () => {
   const groups = findAdjacentGroups(features, 0.01);
   const covered = groups.flat().sort((a, b) => a - b);
   assert.deepEqual(covered, [0, 1, 2]);
+});
+
+test('unionGroup merges two touching squares into one polygon covering both', () => {
+  const merged = unionGroup([square(0, 0, 1, 1), square(1, 0, 2, 1)]);
+  assert.ok(merged);
+  assert.equal(polygonArea(merged), 2);
+});
+
+test('unionGroup passes a single geometry through unchanged', () => {
+  const g = square(0, 0, 1, 1);
+  assert.equal(unionGroup([g]), g);
+});
+
+test('unionGroup returns null on unusable input rather than throwing', () => {
+  assert.equal(
+    unionGroup([{ type: 'Point', coordinates: [0, 0] }, square(0, 0, 1, 1)]),
+    null,
+  );
 });
