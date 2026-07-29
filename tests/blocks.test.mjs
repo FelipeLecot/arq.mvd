@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { polygonArea, mean, meanOrNull, dominantGrado, findAdjacentGroups, unionGroup } from '../scripts/blocks.mjs';
+import { polygonArea, mean, meanOrNull, dominantGrado, findAdjacentGroups, unionGroup, buildBlocks } from '../scripts/blocks.mjs';
 
 function square(x0, y0, x1, y1) {
   return {
@@ -98,4 +98,43 @@ test('unionGroup returns null on unusable input rather than throwing', () => {
 test('unionGroup returns null on null/undefined geometry entry rather than throwing', () => {
   assert.equal(unionGroup([null, square(0, 0, 1, 1)]), null);
   assert.equal(unionGroup([undefined, square(0, 0, 1, 1)]), null);
+});
+
+test('buildBlocks aggregates a small synthetic parcel set into blocks', () => {
+  const parcelFeatures = [
+    { geometry: square(0, 0, 1, 1) },     // touches #1
+    { geometry: square(1, 0, 2, 1) },     // touches #0
+    { geometry: square(50, 50, 51, 51) }, // alone
+  ];
+  const attrs = {
+    grado: ['G2', 'NA', 'G4'],
+    altura: [12, null, 8],
+    permits: [2, 0, 5],
+  };
+
+  const { blockFeatures, blockAttrs, unionFailures } = buildBlocks(parcelFeatures, attrs, {
+    tolerance: 0.01,
+  });
+
+  assert.equal(unionFailures, 0);
+  assert.equal(blockFeatures.length, 2);
+
+  const bySize = blockAttrs.parcelCount
+    .map((count, id) => ({ count, id }))
+    .sort((a, b) => a.count - b.count);
+  const soloBlock = bySize[0].id;
+  const pairBlock = bySize[1].id;
+
+  assert.equal(blockAttrs.parcelCount[soloBlock], 1);
+  assert.equal(blockAttrs.grado[soloBlock], 'G4');
+  assert.equal(blockAttrs.altura[soloBlock], 8);
+  assert.equal(blockAttrs.permits[soloBlock], 5);
+  assert.deepEqual(blockAttrs.parcelIds[soloBlock], [2]);
+
+  assert.equal(blockAttrs.parcelCount[pairBlock], 2);
+  // Equal-area G2/NA split: G2 is more protective, wins the tie.
+  assert.equal(blockAttrs.grado[pairBlock], 'G2');
+  assert.equal(blockAttrs.altura[pairBlock], 12); // mean of [12, null], skipping the null
+  assert.equal(blockAttrs.permits[pairBlock], 1); // mean of [2, 0]
+  assert.deepEqual(blockAttrs.parcelIds[pairBlock].sort(), [0, 1]);
 });

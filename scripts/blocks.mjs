@@ -234,3 +234,52 @@ export function unionGroup(geometries) {
     return null;
   }
 }
+
+export function buildBlocks(parcelFeatures, attrs, { tolerance = 0.5 } = {}) {
+  const groups = findAdjacentGroups(parcelFeatures, tolerance);
+
+  const blockFeatures = [];
+  const blockAttrs = {
+    id: [],
+    parcelIds: [],
+    parcelCount: [],
+    grado: [],
+    gradoSharePct: [],
+    altura: [],
+    permits: [],
+  };
+  let unionFailures = 0;
+
+  groups.forEach((memberIds, blockId) => {
+    const geometries = memberIds.map((i) => parcelFeatures[i].geometry);
+    let merged = geometries.length === 1 ? geometries[0] : unionGroup(geometries);
+    if (!merged) {
+      // A failed/degenerate union must not silently drop a block's footprint — fall back
+      // to keeping every member's own geometry as a MultiPolygon rather than merging.
+      unionFailures++;
+      merged = {
+        type: 'MultiPolygon',
+        coordinates: geometries.flatMap((g) =>
+          g.type === 'MultiPolygon' ? g.coordinates : [g.coordinates],
+        ),
+      };
+    }
+
+    const gradoEntries = memberIds.map((i) => ({
+      code: attrs.grado[i],
+      area: polygonArea(parcelFeatures[i].geometry),
+    }));
+    const dominant = dominantGrado(gradoEntries);
+
+    blockFeatures.push({ type: 'Feature', id: blockId, geometry: merged, properties: { id: blockId } });
+    blockAttrs.id.push(blockId);
+    blockAttrs.parcelIds.push(memberIds);
+    blockAttrs.parcelCount.push(memberIds.length);
+    blockAttrs.grado.push(dominant.code);
+    blockAttrs.gradoSharePct.push(dominant.sharePct);
+    blockAttrs.altura.push(meanOrNull(memberIds.map((i) => attrs.altura[i])));
+    blockAttrs.permits.push(mean(memberIds.map((i) => attrs.permits[i])));
+  });
+
+  return { blockFeatures, blockAttrs, unionFailures };
+}
