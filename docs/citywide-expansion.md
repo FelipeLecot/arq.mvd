@@ -73,6 +73,54 @@ Output file sizes roughly grew 10–20x (`data/attrs.json` ~22 MB, `data/centro.
 wasn't a concern worth solving in the pipeline itself since compression is a serving-layer
 concern, not a data one.
 
+## The merged block layer (added 2026-07-29, corrected 2026-08-02)
+
+208,862 parcels is more than the zoomed-out view can usefully draw *or* usefully show, so
+`scripts/blocks.mjs` merges touching parcels into city blocks for a second, coarser LOD.
+No manzana dataset exists to join against (`data-sources.md`), so blocks are derived
+from cadastral adjacency at a 0.5 m tolerance. Measured on the 2026-08-02 rebuild:
+
+```
+Blocks:                  8,360   (a 25x reduction from 208,862 parcels)
+Multi-parcel groups:     7,797   single-parcel blocks: 563
+Largest block:             491 parcels
+Union failures:              0   (0.0% — blocks that fell back to unmerged member geometry)
+Fully dissolved outlines: 8,274 of 8,360 (99.0%; the other 86 are genuinely disjoint groups)
+```
+
+**These numbers replace an earlier, much worse set**, and the difference is worth recording
+because the cause was invisible in the output. `buildBlocks` originally ran against the parcel
+geometry as projected — full-precision floats — where neighbouring parcels' shared edges disagree
+by sub-tolerance amounts. `polygon-clipping.union` threw or degenerated on **2,942 of 8,360 blocks
+(35.2%)**, and the safe fallback (keep every member's own geometry as a `MultiPolygon`) meant
+nothing crashed and nothing rendered *wrong* — it just quietly shipped a "merged" layer in which
+only 959 blocks (11%) were actually merged. Running the same union against the geometry
+`topology()` has already snapped to the `QUANTIZATION = 1e5` grid (~0.44 m × 0.31 m citywide)
+makes each shared edge bit-identical on both sides and takes the failure count to zero. Grouping
+itself was unaffected — still exactly 8,360 blocks — because the grid is finer than the 0.5 m
+adjacency tolerance.
+
+The knock-on effects were much larger than the fix:
+
+| | raw-float union | quantized union |
+| --- | --- | --- |
+| `blocks.topo.json`, unsimplified | 17,686,178 B | 4,494,603 B |
+| `blocks.topo.json`, simplified + re-quantized (shipped) | 12,993,970 B | **1,391,507 B** |
+| arc points, shipped | 707,553 | 75,202 |
+| saving from the simplification pass alone | 26.5% | 69.0% |
+| `npm run build:data`, wall clock | ~4.5 h | ~3 min |
+
+The simplification pass (`presimplify` → `simplify(minWeight=100)` → `quantize`, in that order —
+quantization must be last) saves far more now because it is finally simplifying
+block outlines rather than thousands of internal parcel seams it can't remove. The build time is
+the same story: the hours were `polygon-clipping` thrashing on degenerate near-coincident edges
+before failing, not adjacency detection. `buildBlocks` over all 208,862 parcels now measures 40.5 s.
+
+Two known, accepted properties of the shipped layer: six single-parcel blocks (30–175 m²
+footprints) simplify away to zero area, which is `minWeight=100` behaving as specified for a layer
+only ever drawn at ~10 m/pixel; and `blockAttrs.parcelIds` ships ~1.4 MB the client never reads,
+kept deliberately so a block can be traced back to its members.
+
 ## Verified, live, in a browser
 
 Screenshots and a Playwright pass (2026-07-28) confirmed: no console errors, the new `NA` parcels
