@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import * as shapefile from 'shapefile';
 import { topology } from 'topojson-server';
 import { presimplify, simplify } from 'topojson-simplify';
-import { quantize } from 'topojson-client';
+import { feature, quantize } from 'topojson-client';
 import { DATA_DIR, RAW_DIR } from './paths.mjs';
 import { readBySuffix } from './zip.mjs';
 import { parsePermits } from './permits.mjs';
@@ -216,8 +216,30 @@ async function main() {
   stats.parcelsWithAddress = attrs.address.filter(Boolean).length;
   stats.parcelsWithHeritageDetail = attrs.architect.filter(Boolean).length;
 
+  // ---- Parcel topology, built BEFORE the blocks so the blocks can be merged from it -----
+  const parcelsTopo = topology(
+    { parcels: { type: 'FeatureCollection', features: parcelFeatures } },
+    QUANTIZATION,
+  );
+
   // ---- Blocks: merge touching parcels into city-block geometry for the zoomed-out LOD --
-  const { blockFeatures, blockAttrs, unionFailures } = buildBlocks(parcelFeatures, attrs);
+  // Merged from the parcel geometry AS QUANTIZED, not from the raw projected floats.
+  // Neighbouring cadastral parcels are digitized with sub-millimetre disagreement along
+  // their shared edge; polygon-clipping's union throws or degenerates on that noise often
+  // enough that merging the raw coordinates failed on ~35% of multi-parcel groups, leaving
+  // most "blocks" as unmerged MultiPolygons with visible internal parcel seams. Decoding
+  // the topology snaps every coordinate to the same ~0.4 m grid the browser will render,
+  // so a shared edge becomes bit-identical on both sides and the union succeeds. It also
+  // means block outlines line up exactly with the parcel outlines they replace at the LOD
+  // swap. feature() preserves the input feature order, so index i still addresses the same
+  // parcel in attrs.* — load-bearing for every attrs.grado[i] lookup inside aggregateGroups.
+  const quantizedParcels = feature(parcelsTopo, parcelsTopo.objects.parcels).features;
+  // Nothing reads the raw projected geometry after this point, and holding 208k parcels'
+  // worth of it alongside both the topology and its decode is a few hundred MB against a
+  // ~4 GB default heap. Dropping it here keeps the peak below where it was before the
+  // reorder rather than above it.
+  parcelFeatures.length = 0;
+  const { blockFeatures, blockAttrs, unionFailures } = buildBlocks(quantizedParcels, attrs);
   stats.blocks = blockFeatures.length;
   stats.blockUnionFailures = unionFailures;
 
@@ -242,10 +264,7 @@ async function main() {
   stats.streetTypes = [...new Set(viaFeatures.map((f) => f.properties.tipo))].filter(Boolean);
 
   // ---- Emit ----------------------------------------------------------------------
-  const parcelsTopo = topology(
-    { parcels: { type: 'FeatureCollection', features: parcelFeatures } },
-    QUANTIZATION,
-  );
+  // parcelsTopo is already built above — the blocks are derived from its quantized output.
   const viasTopo = topology(
     {
       vias: { type: 'FeatureCollection', features: viaFeatures },
@@ -274,6 +293,11 @@ async function main() {
     generated: new Date().toISOString(),
     bbox: dataBbox,
     counts: { parcels: stats.parcels, streets: stats.streets, blocks: stats.blocks },
+    // How many blocks fell back to keeping their members' own geometry because the union
+    // failed. Persisted rather than only logged so a regression in the merge (the shape
+    // that already cost one rebuild — see the quantization note above) is testable and
+    // trackable across builds instead of visible only in a build log nobody kept.
+    blockUnionFailures: stats.blockUnionFailures,
     gradeCounts,
     gradeOrder: GRADE_ORDER,
     coverage: {
