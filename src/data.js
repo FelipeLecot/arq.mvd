@@ -5,23 +5,36 @@ import { feature } from 'topojson-client';
  * attribute never re-parses topology.
  */
 export async function loadAtlas() {
-  const [parcelsTopo, viasTopo, blocksTopo, attrsDoc] = await Promise.all([
+  const [parcelsTopo, viasTopo, attrsDoc] = await Promise.all([
     fetch('/data/centro.topo.json').then((r) => r.json()),
     fetch('/data/vias.topo.json').then((r) => r.json()),
-    fetch('/data/blocks.topo.json').then((r) => r.json()),
     fetch('/data/attrs.json').then((r) => r.json()),
   ]);
 
   const parcels = feature(parcelsTopo, parcelsTopo.objects.parcels);
   const vias = feature(viasTopo, viasTopo.objects.vias);
   const ambito = feature(viasTopo, viasTopo.objects.ambito);
-  const blocks = feature(blocksTopo, blocksTopo.objects.blocks);
+
+  // Block GEOMETRY is deliberately outside the blocking load. It is the second-largest
+  // file the atlas ships and it is only ever drawn below BLOCK_LOD_MAX_K, so a session
+  // that never zooms out past the initial fit would otherwise wait on ~13 MB — fetch,
+  // parse, decode and index — for a layer it never displays. Block ATTRIBUTES do stay in
+  // the blocking load: they ride along in attrs.json, which is fetched regardless.
+  let blocksPromise = null;
+  function loadBlocks() {
+    if (!blocksPromise) {
+      blocksPromise = fetch('/data/blocks.topo.json')
+        .then((r) => r.json())
+        .then((topo) => feature(topo, topo.objects.blocks).features);
+    }
+    return blocksPromise;
+  }
 
   return {
     parcels: parcels.features,
     vias: vias.features,
     ambito,
-    blocks: blocks.features,
+    loadBlocks,
     attrs: attrsDoc.attrs,
     blockAttrs: attrsDoc.blockAttrs,
     meta: attrsDoc.meta,

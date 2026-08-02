@@ -171,7 +171,10 @@ function blockValuesFor(attr) {
 function redraw() {
   const rect = stage.getBoundingClientRect();
   const t = screenTransform(projection, state.transform);
-  const lod = state.transform.k < BLOCK_LOD_MAX_K ? 'block' : 'parcel';
+  // blockItems is undefined until the deferred block-geometry fetch resolves (see
+  // loadBlocks in data.js). Until then the parcel LOD is drawn at every zoom — slower
+  // zoomed out, but correct and complete, which is the right way to degrade.
+  const lod = state.transform.k < BLOCK_LOD_MAX_K && blockItems ? 'block' : 'parcel';
 
   mapCtx.save();
   mapCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -355,9 +358,8 @@ async function main() {
   idColors = items.map((_, i) => idToColor(i));
   heights = atlas.attrs.altura;
 
-  blockItems = prepareFeatures(atlas.blocks);
-  blockIndex = buildIndex(blockItems);
-  blockIdColors = blockItems.map((_, i) => idToColor(i));
+  // Block attributes ride along in attrs.json, so they are available immediately — only
+  // the block geometry is deferred (see loadBlocks below).
   blockHeights = atlas.blockAttrs.altura;
 
   histogram = createHistogram(document.getElementById('hist'), {
@@ -451,6 +453,26 @@ async function main() {
   };
 
   requestAnimationFrame(frame);
+
+  // Only now, with the parcel LOD already painting, pull the block geometry down. It is
+  // the layer the initial view never shows, so it must not sit in front of first paint —
+  // fetching, parsing, decoding and indexing it costs more than everything above.
+  // Until this resolves, redraw() keeps drawing parcels at every zoom (see the lod guard).
+  atlas
+    .loadBlocks()
+    .then((blocks) => {
+      blockItems = prepareFeatures(blocks);
+      blockIndex = buildIndex(blockItems);
+      blockIdColors = blockItems.map((_, i) => idToColor(i));
+      // Only matters if the view is already zoomed out past the swap — a restored hash can
+      // land there — in which case the map is showing parcels and should now show blocks.
+      if (state.transform.k < BLOCK_LOD_MAX_K) state.needsRedraw = true;
+    })
+    .catch((err) => {
+      // The parcel LOD is fully functional without this, so a failure here degrades the
+      // zoomed-out view's performance rather than breaking the atlas.
+      console.error('block layer unavailable, staying on the parcel LOD', err);
+    });
 }
 
 main().catch((err) => {
