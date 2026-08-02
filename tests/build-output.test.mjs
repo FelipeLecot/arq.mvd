@@ -9,8 +9,10 @@ import { join } from 'node:path';
 import { DATA_DIR } from '../scripts/paths.mjs';
 
 const attrsPath = join(DATA_DIR, 'attrs.json');
+const blocksPath = join(DATA_DIR, 'blocks.topo.json');
 const hasBuild = existsSync(attrsPath);
 const skip = hasBuild ? false : 'run `npm run fetch && npm run build:data` first';
+const skipBlocks = hasBuild && existsSync(blocksPath) ? false : 'run `npm run fetch && npm run build:data` first';
 
 test('Centro keeps its own 9016 curated features, ids first', { skip }, () => {
   const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
@@ -72,8 +74,9 @@ test('geometry is projected into Web Mercator and spans the full city, not just 
 
 test('blocks: touching parcels merge into far fewer city-block shapes', { skip }, () => {
   const { meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
-  // Measured on the 2026-07-29 build; a large deviation means the adjacency tolerance or
-  // the underlying parcel geometry changed.
+  // Measured on the 2026-08-02 build; a large deviation means the adjacency tolerance or
+  // the underlying parcel geometry changed. Unchanged by the switch to merging quantized
+  // geometry — the ~0.44 m grid is fine enough not to regroup anything at a 0.5 m tolerance.
   assert.equal(meta.counts.blocks, 8360);
   // Sanity bound rather than an exact figure, so minor upstream data wobble doesn't break
   // this test the way an exact-equality assertion would.
@@ -81,6 +84,38 @@ test('blocks: touching parcels merge into far fewer city-block shapes', { skip }
     meta.counts.blocks < meta.counts.parcels / 3,
     `expected at least a 3x reduction from parcels to blocks, got ${meta.counts.parcels} -> ${meta.counts.blocks}`,
   );
+});
+
+test('blocks: the union actually dissolves, rather than falling back to unmerged members', { skip }, () => {
+  const { meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  // The whole point of merging is one outline per block. When buildBlocks ran against raw
+  // pre-quantization coordinates, polygon-clipping choked on sub-tolerance digitizing noise
+  // at shared parcel edges and 2942 of 8360 blocks (35.2%) fell back to keeping their
+  // members' own geometry — still correct, but with visible internal seams and ~9x the
+  // vertices. Merging the quantized geometry instead takes that to 0. A bound rather than
+  // an exact 0 so a handful of genuinely degenerate groups upstream wouldn't fail the build.
+  assert.equal(typeof meta.blockUnionFailures, 'number', 'blockUnionFailures must be persisted in meta');
+  assert.ok(
+    meta.blockUnionFailures < meta.counts.blocks / 100,
+    `block union failure rate regressed: ${meta.blockUnionFailures}/${meta.counts.blocks}`,
+  );
+});
+
+test('blocks: the emitted topology matches the ids and count the client assumes', { skip: skipBlocks }, () => {
+  const { meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const topo = JSON.parse(readFileSync(blocksPath, 'utf8'));
+  const geometries = topo.objects.blocks.geometries;
+
+  assert.equal(geometries.length, meta.counts.blocks, 'emitted block geometries vs meta.counts.blocks');
+  // presimplify()/simplify() strip `transform` and emit absolute floats; shipping that
+  // instead of quantized deltas is what made this file 91% oversized once already, and
+  // nothing but the file size showed it. Its presence proves quantize() ran last.
+  assert.ok(topo.transform, 'blocks.topo.json must be quantized (no transform => simplify output shipped raw)');
+  // The client derives block ids positionally — prepareFeatures index, idToColor(i) — and
+  // looks the same index up in blockAttrs' parallel arrays. If the emitted order ever
+  // stopped matching, every hover would report a different block's attributes.
+  const misaligned = geometries.findIndex((g, i) => g.properties.id !== i);
+  assert.equal(misaligned, -1, `geometry at index ${misaligned} carries a non-positional id`);
 });
 
 test('blocks: attribute arrays are index-aligned and fully populated', { skip }, () => {
