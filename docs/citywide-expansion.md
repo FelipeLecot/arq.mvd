@@ -147,5 +147,7 @@ at once, only to pan into it. That's a front-end change, deliberately left out o
   designation implies *some* survey was done even if it never reached the open-data catalog).
   `AREA_DIFER` is ready to use as the barrio filter whenever a barrio-scoped view is needed.
 - **Front-end**: loosen `scaleExtent`/the initial fit so a full-city view is actually reachable;
-  confirm CDN gzip on the larger JSON payloads; decide whether `FOS`/`RETIRO`/`barrio` (parsed and
-  stored but not yet visualized) get their own map attribute.
+  confirm CDN gzip on the larger JSON payloads; decide whether `barrio` (parsed and stored as
+  `attrs.barrio` but not yet visualized) gets its own map attribute. `FOS`/`FIS`/`RETIRO` exist on
+  `v_mdg_parcelas` (see `data-sources.md`) but aren't parsed at all yet — `scripts/build.mjs` only
+  reads `ALTURA` and `AREA_DIFER` off that source today.

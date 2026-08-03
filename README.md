@@ -168,7 +168,7 @@ distinction took a build from ~4.5 hours and 35% union failures to ~3 minutes an
 
 Median redraw at 1440×900, measured on Centro's original 9,016-parcel dataset from a fixed view
 (the citywide dataset now runs through the spatial index and block LOD described above; see
-`docs/citywide-expansion.md` and `CLAUDE.md` for how those keep per-frame work bounded at 208k
+`docs/citywide-expansion.md` for how those keep per-frame work bounded at 208k
 parcels):
 
 | | median redraw |
@@ -179,18 +179,3 @@ parcels):
 
 Extrusion of the whole visible set costs well over a frame, so an active gesture draws the flat
 map and the volume returns when the gesture settles.
-
-## Colour
-
-Three single-hue ramps, each validated for monotone lightness, adjacent-step separation, and
-contrast against the `#0E1219` ground. The grade ramp runs dim umber to bright gold — the
-register's own ranking of architectural value made literal, so the 57 Grado 4 buildings glow
-against a recessive mass of un-catalogued stock. Régimen General, Sin Catalogar and the citywide
-`NA` sit deliberately off the ramp in neutral slate: they are not a low grade, they are unassessed.
-
-## Further reading
-
-- `docs/data-sources.md` — every source, live and candidate, with access routes and coverage.
-- `docs/citywide-expansion.md` — how the citywide POT layer and block-merge LOD were added, with
-  measured before/after numbers.
-- `CLAUDE.md` — architecture notes and gotchas for anyone touching the pipeline or renderer.
