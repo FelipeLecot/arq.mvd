@@ -88,6 +88,28 @@ async function main() {
     const entry = {
       altura: parsePotNumeric(props.ALTURA),
       areaDifer: String(props.AREA_DIFER ?? '').trim() || null,
+      areaTotal: Number.isFinite(props.AREATOT) ? props.AREATOT : null,
+      areaCatastral: Number.isFinite(props.AREACAT) ? props.AREACAT : null,
+      esPropiedadHorizontal: props.PH === 1,
+      carpetaPh: Number.isFinite(props.CARPETA_PH) ? props.CARPETA_PH : null,
+      categoriaZona: cleanText(props.CATEGORIA),
+      subCategoriaZona: cleanText(props.SUB_CATEGO),
+      rgs: cleanText(props.RGS),
+      usoPredominante: cleanText(props.USOPRE),
+      // RETIRO/FOS/FIS/GALIBO mix pure numbers ("60") with qualifier codes ("20R", "NC",
+      // "ADET") — parsePotNumeric (as ALTURA uses) would silently drop the qualifier, so
+      // these stay raw trimmed strings instead of coerced numbers.
+      retiro: cleanText(props.RETIRO),
+      fos: cleanText(props.FOS),
+      fis: cleanText(props.FIS),
+      galibo: cleanText(props.GALIBO),
+      planEspecial: cleanText(props.PLANESP),
+      planParcial: cleanText(props.PLANPARCIA),
+      promocion: cleanText(props.PROMO),
+      transicionNombre: cleanText(props.NOM_TRANS),
+      transicionTipo: cleanText(props.TIPO_TRANS),
+      transicionEstado: cleanText(props.ESTADO_TRA),
+      rnAreaDiferenciada: cleanText(props.RN_AREA_DI),
     };
     if (Number.isFinite(padron) && !potAttrsByPadron.has(padron)) potAttrsByPadron.set(padron, entry);
     potFeatures.push({ padron: Number.isFinite(padron) ? padron : null, geometry: f.geometry, ...entry });
@@ -200,6 +222,25 @@ async function main() {
     cvBuildingNameOrig: [],
     cvBuildingName: [],
     barrio: [],
+    areaTotal: [],
+    areaCatastral: [],
+    esPropiedadHorizontal: [],
+    carpetaPh: [],
+    categoriaZona: [],
+    subCategoriaZona: [],
+    rgs: [],
+    usoPredominante: [],
+    retiro: [],
+    fos: [],
+    fis: [],
+    galibo: [],
+    planEspecial: [],
+    planParcial: [],
+    promocion: [],
+    transicionNombre: [],
+    transicionTipo: [],
+    transicionEstado: [],
+    rnAreaDiferenciada: [],
     heritageName: [],
     architect: [],
     builtDate: [],
@@ -234,6 +275,25 @@ async function main() {
     attrs.destino.push(permit ? permit.destino : null);
     attrs.gradoDetail.push(gradoDetail);
     attrs.barrio.push(pot ? pot.areaDifer : null);
+    attrs.areaTotal.push(pot ? pot.areaTotal : null);
+    attrs.areaCatastral.push(pot ? pot.areaCatastral : null);
+    attrs.esPropiedadHorizontal.push(pot ? pot.esPropiedadHorizontal : null);
+    attrs.carpetaPh.push(pot ? pot.carpetaPh : null);
+    attrs.categoriaZona.push(pot ? pot.categoriaZona : null);
+    attrs.subCategoriaZona.push(pot ? pot.subCategoriaZona : null);
+    attrs.rgs.push(pot ? pot.rgs : null);
+    attrs.usoPredominante.push(pot ? pot.usoPredominante : null);
+    attrs.retiro.push(pot ? pot.retiro : null);
+    attrs.fos.push(pot ? pot.fos : null);
+    attrs.fis.push(pot ? pot.fis : null);
+    attrs.galibo.push(pot ? pot.galibo : null);
+    attrs.planEspecial.push(pot ? pot.planEspecial : null);
+    attrs.planParcial.push(pot ? pot.planParcial : null);
+    attrs.promocion.push(pot ? pot.promocion : null);
+    attrs.transicionNombre.push(pot ? pot.transicionNombre : null);
+    attrs.transicionTipo.push(pot ? pot.transicionTipo : null);
+    attrs.transicionEstado.push(pot ? pot.transicionEstado : null);
+    attrs.rnAreaDiferenciada.push(pot ? pot.rnAreaDiferenciada : null);
     attrs.heritageName.push(heritage ? heritage.name : null);
     attrs.architect.push(heritage ? heritage.architect : null);
     attrs.builtDate.push(heritage ? heritage.builtDate : null);
