@@ -5,7 +5,7 @@ A client-side architectural atlas of Montevideo, drawn entirely from Intendencia
 Canvas 2D with a fake-3D extrusion **by legal building height**.
 
 The objective of this project is to give insight into the maintenance and restoration needs of
-Montevideo's protected architectural heritag, which buildings are catalogued and at what
+Montevideo's protected architectural heritage, which buildings are catalogued and at what
 protection grade, what their legal height/setback envelope is, and (where the open data allows)
 how much building-permit activity has touched that protected stock since 1997. Grade, height and
 permits are the same three lenses the UI lets you switch between.
@@ -23,9 +23,10 @@ npm run dev          # http://localhost:5173
 
 ## Controls
 
-Drag to pan, wheel to zoom, hover to inspect a parcel. North is always up. Below a zoom threshold
-the map swaps individual parcels for merged city blocks — cheap to draw and still legible at a
-scale where a single lot line stops meaning anything.
+Drag to pan, wheel to zoom, hover to inspect a parcel. North is always up. Once enough parcels are
+visible at once — panning into dense citywide territory — the map swaps individual parcels for
+merged city blocks, cheap to draw and still legible at a scale where a single lot line stops
+meaning anything. Type a padrón number into the search box to jump straight to that parcel.
 
 ## Coverage: two tiers, for one reason
 

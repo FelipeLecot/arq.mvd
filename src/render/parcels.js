@@ -181,10 +181,16 @@ export function drawParcels(ctx, items, t, opts) {
 
     // The search pin is a persistent marker, independent of hover — a cool accent keeps
     // it legible against the hover highlight's warm amber when the same parcel is both.
+    // It must also stay independent of the histogram-filter dimming above: a searched
+    // parcel outside the active filter still needs a fully visible outline, so the alpha
+    // set for the dim fill is overridden to full opacity for the stroke, then restored.
     if (id === pinnedId) {
+      const prevAlpha = ctx.globalAlpha;
+      ctx.globalAlpha = 1;
       ctx.strokeStyle = '#5AC8FA';
       ctx.lineWidth = 1.75;
       ctx.stroke();
+      ctx.globalAlpha = prevAlpha;
     }
 
     if (id === hoveredId) {

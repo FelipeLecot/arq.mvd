@@ -16,10 +16,11 @@ export async function loadAtlas() {
   const ambito = feature(viasTopo, viasTopo.objects.ambito);
 
   // Block GEOMETRY is deliberately outside the blocking load. It is the second-largest
-  // file the atlas ships and it is only ever drawn below BLOCK_LOD_MAX_K, so a session
-  // that never zooms out past the initial fit would otherwise wait on ~13 MB — fetch,
-  // parse, decode and index — for a layer it never displays. Block ATTRIBUTES do stay in
-  // the blocking load: they ride along in attrs.json, which is fetched regardless.
+  // file the atlas ships and it is only ever drawn once the visible parcel count crosses
+  // BLOCK_LOD_PARCEL_BUDGET (main.js), so a session that never pans/zooms into a dense
+  // enough view would otherwise wait on ~13 MB — fetch, parse, decode and index — for a
+  // layer it never displays. Block ATTRIBUTES do stay in the blocking load: they ride
+  // along in attrs.json, which is fetched regardless.
   let blocksPromise = null;
   function loadBlocks() {
     if (!blocksPromise) {

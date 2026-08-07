@@ -18,11 +18,17 @@ import { buildPadronIndex, findExact, findPrefix, parseQuery } from './search.js
 const MAX_ENVELOPE_M = 150;
 const BASE_PAD_PX = 24;
 
-// Centro's original 9,016-parcel viewport was already cheap enough without an LOD swap.
-// Below the zoom scale that fit was designed for, the viewport can span far more of the
-// citywide dataset, so draw merged blocks instead of individual parcels. Tune by watching
-// window.__atlas.perf.lastRedrawMs while panned into a dense area and zoomed to different scales.
-const BLOCK_LOD_MAX_K = 1.5;
+// Centro's original 9,016-parcel viewport was already cheap enough without an LOD swap,
+// and the app's landing view sits well within that. A raw zoom-scale threshold doesn't
+// capture this: k=1 (the landing transform) is a low zoom over a *sparse* area, but the
+// same k panned into dense citywide POT territory can put far more parcels on screen. So
+// this is a budget on how many parcels are actually *visible*, not on how zoomed out the
+// view is — draw merged blocks once that many individual lot outlines would need drawing,
+// regardless of k. 12,500 gives Centro's own full viewport (~9,016 parcels) comfortable
+// margin to stay on the parcel LOD, while still swapping to blocks well before a dense
+// citywide viewport at a similar zoom gets expensive. Tune by watching
+// window.__atlas.perf.lastRedrawMs while panned into a dense area at different scales.
+const BLOCK_LOD_PARCEL_BUDGET = 12500;
 
 /**
  * Mercator-space viewport rectangle for the current screen transform, padded so a
@@ -45,6 +51,18 @@ function visibleParcelOrder(t, width, height, extrude, exaggeration) {
   const [minX, minY, maxX, maxY] = viewportMercatorBounds(t, width, height, extrude, exaggeration);
   const ids = queryIds(parcelIndex, minX, minY, maxX, maxY);
   return ids.sort((a, b) => items[b].cy - items[a].cy);
+}
+
+/**
+ * Count of parcel ids visible in the current viewport, for the block-LOD budget decision
+ * only — unlike visibleParcelOrder, it skips the sort, since a count doesn't need
+ * painter's-algorithm order. Queried without extrusion padding (matching how
+ * visibleBlockOrder/visibleLines already query): the budget is about how many individual
+ * lot outlines would need drawing, not about how far extrusion overdraw reaches.
+ */
+function visibleParcelCount(t, width, height) {
+  const [minX, minY, maxX, maxY] = viewportMercatorBounds(t, width, height, false, 1);
+  return queryIds(parcelIndex, minX, minY, maxX, maxY).length;
 }
 
 /** Visible street/ámbito lines — streets don't extrude, so no extra padding needed. */
@@ -183,9 +201,14 @@ function redraw() {
   const rect = stage.getBoundingClientRect();
   const t = screenTransform(projection, state.transform);
   // blockItems is undefined until the deferred block-geometry fetch resolves (see
-  // loadBlocks in data.js). Until then the parcel LOD is drawn at every zoom — slower
-  // zoomed out, but correct and complete, which is the right way to degrade.
-  const lod = state.transform.k < BLOCK_LOD_MAX_K && blockItems ? 'block' : 'parcel';
+  // loadBlocks in data.js). Until then the parcel LOD is drawn regardless of how many
+  // parcels are visible — slower zoomed out, but correct and complete, which is the right
+  // way to degrade. Once blocks are available, the swap is driven by how many parcels are
+  // actually on screen right now (see BLOCK_LOD_PARCEL_BUDGET), not by zoom level.
+  const lod =
+    blockItems && visibleParcelCount(t, rect.width, rect.height) > BLOCK_LOD_PARCEL_BUDGET
+      ? 'block'
+      : 'parcel';
 
   mapCtx.save();
   mapCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -431,11 +454,12 @@ async function main() {
   select(mapCanvas).call(zoomBehavior);
 
   /**
-   * Centre and zoom to a feature's Mercator bounds. The `k` floor sits well above
-   * BLOCK_LOD_MAX_K so every search result forces the parcel LOD, even when the map was
-   * zoomed out into blocks; the ceiling matches the zoom behavior's own scaleExtent.
-   * Skips the transition (jumps instantly) under prefers-reduced-motion, mirroring the
-   * reduced-motion rule in style.css.
+   * Centre and zoom to a feature's Mercator bounds. The `k` floor of 8 keeps the
+   * resulting viewport small — small enough that its visible parcel count stays well
+   * under BLOCK_LOD_PARCEL_BUDGET — so every search result forces the parcel LOD, even
+   * when the map was zoomed out into blocks beforehand; the ceiling matches the zoom
+   * behavior's own scaleExtent. Skips the transition (jumps instantly) under
+   * prefers-reduced-motion, mirroring the reduced-motion rule in style.css.
    */
   function flyTo(id) {
     const rect = stage.getBoundingClientRect();
@@ -544,7 +568,10 @@ async function main() {
   }
 
   searchInput.addEventListener('input', () => {
-    const digits = searchInput.value.replace(/\D/g, '');
+    // Same leading-digit-run rule as parseQuery (used on submit), so a query that shows
+    // suggestions here is guaranteed not to be rejected as invalid on Enter.
+    const padron = parseQuery(searchInput.value);
+    const digits = padron == null ? '' : String(padron);
     if (digits.length < 2) {
       hideSearchFeedback();
       return;
@@ -575,6 +602,19 @@ async function main() {
       hint.style.opacity = '1';
     }
     state.needsRedraw = true;
+  });
+
+  // The suggestions/disambiguation dropdown otherwise only closes on submit, on explicit
+  // clear, or when typing drops below the minimum length — so a user who types a partial
+  // query and then clicks the map instead is left with it parked over the canvas,
+  // intercepting pointer events there. `pointerdown` (not `blur`) so a click on a
+  // suggestion button still registers: blur fires before that button's own click.
+  document.addEventListener('pointerdown', (e) => {
+    if (!searchForm.contains(e.target)) hideSearchFeedback();
+  });
+
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') hideSearchFeedback();
   });
 
   const restored = readHash();
@@ -638,9 +678,10 @@ async function main() {
       blockItems = prepareFeatures(blocks);
       blockIndex = buildIndex(blockItems);
       blockIdColors = blockItems.map((_, i) => idToColor(i));
-      // Only matters if the view is already zoomed out past the swap — a restored hash can
-      // land there — in which case the map is showing parcels and should now show blocks.
-      if (state.transform.k < BLOCK_LOD_MAX_K) state.needsRedraw = true;
+      // redraw()'s own LOD logic decides parcel vs. block from here on (see
+      // BLOCK_LOD_PARCEL_BUDGET) — an unconditional redraw is cheap, and a restored hash
+      // can already be panned somewhere dense enough that blocks should show immediately.
+      state.needsRedraw = true;
     })
     .catch((err) => {
       // The parcel LOD is fully functional without this, so a failure here degrades the
