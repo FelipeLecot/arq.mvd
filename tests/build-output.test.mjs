@@ -39,16 +39,21 @@ test('the 92 Centro "Altura especial" parcels are null, not 0', { skip }, () => 
   // null, never 0) — see parsePotNumeric's dedicated test.
 });
 
-test('grade distribution: Centro grades untouched, NA covers everything outside the inventory', { skip }, () => {
+test('grade distribution: Centro grades untouched by pass 1, Ciudad Vieja grades merged in by pass 2', { skip }, () => {
   const { meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  // Measured on the 2026-08-07 build (post Task 4-7). RG is Centro-only and unchanged from
+  // the pre-expansion figure (3875) since pass 1 doesn't consult the Ciudad Vieja map; every
+  // other grade grew by however many of the 1835 Ciudad Vieja heritage records matched a
+  // citywide padron (1743 did — see the gradoSource test below) and NA shrank by that same
+  // 1743.
   assert.equal(meta.gradeCounts.RG, 3875);
-  assert.equal(meta.gradeCounts.G2, 2375);
-  assert.equal(meta.gradeCounts.G1, 1743);
-  assert.equal(meta.gradeCounts.G3, 590);
-  assert.equal(meta.gradeCounts.G0, 316);
-  assert.equal(meta.gradeCounts.SC, 60);
-  assert.equal(meta.gradeCounts.G4, 57);
-  assert.ok(meta.gradeCounts.NA > 190000, `expected >190k NA parcels, got ${meta.gradeCounts.NA}`);
+  assert.equal(meta.gradeCounts.G0, 537);
+  assert.equal(meta.gradeCounts.G1, 2351);
+  assert.equal(meta.gradeCounts.G2, 2981);
+  assert.equal(meta.gradeCounts.G3, 852);
+  assert.equal(meta.gradeCounts.G4, 102);
+  assert.equal(meta.gradeCounts.SC, 61);
+  assert.ok(meta.gradeCounts.NA > 190000 && meta.gradeCounts.NA < 199846, `expected NA to shrink from 199846 by roughly the Ciudad Vieja match count, got ${meta.gradeCounts.NA}`);
 });
 
 test('citywide coverage stats are internally consistent', { skip }, () => {
@@ -126,4 +131,48 @@ test('blocks: attribute arrays are index-aligned and fully populated', { skip },
   }
   assert.equal(blockAttrs.parcelCount.filter((c) => c < 1).length, 0, 'every block has at least one parcel');
   assert.equal(blockAttrs.grado.filter((g) => g == null).length, 0, 'every block has a dominant grado');
+});
+
+test('gradoSource identifies which survey graded each parcel', { skip }, () => {
+  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  assert.equal(attrs.gradoSource.slice(0, 9016).filter((s) => s !== 'centro').length, 0, 'every Centro parcel is gradoSource centro');
+  const cvCount = attrs.gradoSource.filter((s) => s === 'ciudad-vieja').length;
+  // Measured 1743 of the 1835 raw Ciudad Vieja heritage records (meta build log's
+  // cvHeritageRecords) actually matched a citywide padron; the rest didn't join to any
+  // v_mdg_parcelas row (e.g. already inside Centro's own inventory, or an unmatched padron).
+  assert.ok(cvCount > 1500 && cvCount < 1891, `expected roughly 1835 ciudad-vieja gradoSource parcels, got ${cvCount}`);
+});
+
+test('Ciudad Vieja cv* fields are populated exactly where gradoSource says they should be', { skip }, () => {
+  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  for (let i = 0; i < attrs.id.length; i++) {
+    const hasCv = attrs.cvGrado2000[i] !== null || attrs.cvEstadoConsExt[i] !== null;
+    if (attrs.gradoSource[i] !== 'ciudad-vieja') {
+      assert.equal(attrs.cvBuildingName[i], null, `parcel ${i} has cvBuildingName without ciudad-vieja gradoSource`);
+    }
+  }
+});
+
+test('the remaining v_mdg_parcelas fields are populated citywide', { skip }, () => {
+  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  assert.ok(attrs.areaTotal.filter((v) => v !== null).length > 200000, 'areaTotal should be ~100% populated');
+  assert.ok(attrs.categoriaZona.filter((v) => v !== null).length > 200000, 'categoriaZona should be ~100% populated');
+  assert.equal(typeof attrs.esPropiedadHorizontal[0], 'boolean');
+});
+
+test('landmark fields (protectionType, direccion) ride alongside the existing architect/date fields', { skip }, () => {
+  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const withArchitect = attrs.architect.filter((v) => v !== null).length;
+  const withProtectionType = attrs.protectionType.filter((v) => v !== null).length;
+  assert.ok(withProtectionType >= withArchitect, 'protectionType (100% of landmark records) should be at least as common as architect (41%)');
+});
+
+test('permit firstYear/totalArea/expediente are wired through and internally consistent', { skip }, () => {
+  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  let violations = 0;
+  for (let i = 0; i < attrs.id.length; i++) {
+    if (attrs.firstPermitYear[i] != null && attrs.lastPermitYear[i] != null && attrs.firstPermitYear[i] > attrs.lastPermitYear[i]) violations++;
+  }
+  assert.equal(violations, 0);
+  assert.ok(attrs.lastPermitExpediente.filter((v) => v !== null).length > 0, 'at least some permits should carry an expediente');
 });
