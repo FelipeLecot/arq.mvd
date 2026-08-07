@@ -21,6 +21,7 @@ export function parsePermits(zipBuf) {
   const iArea = col('area');
   const iAnio = col('anio');
   const iTipo = col('tipo_obra');
+  const iExpediente = col('expediente');
 
   const byPadron = new Map();
 
@@ -34,7 +35,7 @@ export function parsePermits(zipBuf) {
 
     let rec = byPadron.get(padron);
     if (!rec) {
-      rec = { count: 0, lastYear: null, firstYear: null, totalArea: 0, destino: null, tipo: null };
+      rec = { count: 0, lastYear: null, firstYear: null, totalArea: 0, destino: null, tipo: null, expediente: null };
       byPadron.set(padron, rec);
     }
 
@@ -43,10 +44,11 @@ export function parsePermits(zipBuf) {
     if (Number.isFinite(year)) {
       if (rec.lastYear === null || year > rec.lastYear) {
         rec.lastYear = year;
-        // Keep the destino/tipo of the most recent permit — the best available guess at
-        // what the building is used for today.
+        // Keep the destino/tipo/expediente of the most recent permit — the best available
+        // guess at what the building is used for today, plus a citable case reference.
         rec.destino = (cells[iDestino] || '').trim() || null;
         rec.tipo = (cells[iTipo] || '').trim() || null;
+        rec.expediente = (cells[iExpediente] || '').trim() || null;
       }
       if (rec.firstYear === null || year < rec.firstYear) rec.firstYear = year;
     }
