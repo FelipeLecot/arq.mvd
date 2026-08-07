@@ -129,14 +129,15 @@ conservation state, building era, and floor-by-floor use codes. Wired 2026-08-07
 new WFS `kind` in `sources.mjs`/`fetch.mjs`. Measured on the final build:
 
 ```
-Ciudad Vieja padrones matched:           1,743 (of 1,835 distinct in source; 91 never matched)
+Ciudad Vieja padrones matched:           1,743 (of 1,835 distinct in source; 92 never matched)
 Grade shift from merge:
   Before:  G0=316, G1=1,743, G2=2,375, G3=590, G4=57, RG=3,875, SC=60, NA=199,846
   After:   G0=537, G1=2,351, G2=2,981, G3=852, G4=102, RG=3,875, SC=61, NA=198,103
   Delta:  +221 G0, +608 G1, +606 G2, +262 G3, +45 G4 (1,742 parcels regraded)
 
 Four additional sources now read new fields:
-  v_pat_mhn_bienespatrimoniales:  protectionType (1,131 parcels), decreto, nroEspacio
+  v_pat_mhn_bienespatrimoniales:  protectionType (1,131 parcels), direccion (1,129 parcels),
+                                  decreto, nroEspacio
   v_mdg_parcelas:                 areaTotal (208,828/208,862), areaCatastral, usoPredominante,
                                   retiro, fos, fis, galibo, plan/categoria/promocion fields
   permisos:                        lastPermitExpediente (22,054 parcels)
@@ -145,13 +146,14 @@ Four additional sources now read new fields:
 Coverage:  heritage detail 0.2%, permits 10.6%, addresses 99.5%
 ```
 
-The merge consolidates three survey years (`grado_prot_1983`/`_2000`/`_2010`) into the shared
-`grado` field via `parseCvGrado` — same 0-4 scale as Centro, confirmed against IM's own legend
-(see `attrs.gradoSource` for source year per parcel). Every other Ciudad Vieja field ships raw
-(`cv`-prefixed in `attrs.json`): `estado_cons_ext`/`_int`, `epoca_ori`, `categoria`, `tipo_prop`,
-`reg_prop`, `uso_global_ori`/`_act`, floor-level `uso_ori_*`/`uso_act_*` (8 fields), and
-`intervenciones_*` (4 fields). No legend was found for these numeric codes despite checking IM's
-Ciudad Vieja portal.
+The merge consolidates three survey years into the shared `grado` field via `parseCvGrado` — same
+0-4 scale as Centro, confirmed against IM's own legend (see `attrs.gradoSource` for source year per
+parcel). Every other Ciudad Vieja field ships raw (`cv`-prefixed in `attrs.json`): `cvGrado1983`,
+`cvGrado2000` (raw 1983/2000 grades for reference), `cvBuildingNameOrig`, `cvBuildingName` (from
+`denom_ori`/`denom_act`), `cvEstadoConsExt`/`_int`, `cvEpoca`, `cvCategoria`, `cvTipoProp`,
+`cvRegProp`, `cvUsoGlobalOri`/`_act`, floor-level `cvUsoOriSs`/`_pb`/`_ep`/`_pa` and
+`cvUsoActSs`/`_pb`/`_ep`/`_pa` (8 fields), and `cvIntervenciones*` (4 fields). No legend was found
+for these numeric codes despite checking IM's Ciudad Vieja portal.
 
 The door-number bug fix (originally Task 7, applied mid-cycle) repaired address parsing in
 `v_mdg_accesos`: the fallback chain checked wrong field names (`PUERTA`/`NRO_PUERTA`/`NRO`), missing
