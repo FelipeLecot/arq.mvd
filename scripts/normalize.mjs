@@ -95,3 +95,30 @@ export function parsePotNumeric(value) {
   const num = Number(text.replace(',', '.'));
   return Number.isFinite(num) ? num : null;
 }
+
+/**
+ * Trim a raw string field to null-or-content. `-` shows up as an explicit "no value"
+ * placeholder on some sources (e.g. v_pat_mhn_bienespatrimoniales's AUTORIA/FECHA) but is a
+ * real value on others (v_mdg_parcelas's GALIBO uses "-" as one of its 3 actual codes) — so
+ * callers pass which placeholder strings apply to their specific field, rather than this
+ * guessing a placeholder that isn't confirmed for every source.
+ */
+export function cleanText(value, placeholders = []) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text || placeholders.includes(text)) return null;
+  return text;
+}
+
+/**
+ * Ciudad Vieja's independent per-building survey (pm_bienes_patrimoniales) grades on the same
+ * 0-4 scale as Centro's grado_proteccion — confirmed identical against IM's own "Criterios de
+ * valoración" legend, so this maps straight onto the existing G0-G4 codes instead of a parallel
+ * scale. grado_prot_2010 is the survey's most current snapshot (populated on 1890 of 1891
+ * records). Unlike parseGrado there's no sentence to parse — the source is already a plain
+ * integer — so this is a lookup, not a regex.
+ */
+export function parseCvGrado(gradoProt2010) {
+  if (gradoProt2010 == null || gradoProt2010 < 0) return { code: 'SC' };
+  return { code: `G${gradoProt2010}` };
+}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePadron, parseSector, parseAltura, parseGrado, parsePotNumeric } from '../scripts/normalize.mjs';
+import { parsePadron, parseSector, parseAltura, parseGrado, parsePotNumeric, cleanText, parseCvGrado } from '../scripts/normalize.mjs';
 
 test('parsePadron strips the sector suffix', () => {
   assert.equal(parsePadron('432381 A'), 432381);
@@ -49,4 +49,28 @@ test('parsePotNumeric returns null for special-regime codes, never 0', () => {
   assert.equal(parsePotNumeric('16.50'), 16.5);
   assert.equal(parsePotNumeric('80'), 80);
   assert.equal(parsePotNumeric(null), null);
+});
+
+test('cleanText trims and nulls out blanks and named placeholders', () => {
+  assert.equal(cleanText('  Arq. Juan Tosi  '), 'Arq. Juan Tosi');
+  assert.equal(cleanText(''), null);
+  assert.equal(cleanText(null), null);
+  assert.equal(cleanText(undefined), null);
+  assert.equal(cleanText('-'), '-'); // '-' is only a placeholder when explicitly listed
+  assert.equal(cleanText('-', ['-']), null);
+  assert.equal(cleanText('sd', ['-', 'sd']), null);
+  assert.equal(cleanText('Torre Cabildo', ['-', 'sd']), 'Torre Cabildo');
+});
+
+test('parseCvGrado maps Ciudad Vieja\'s 0-4 survey scale onto the shared grade codes', () => {
+  // Confirmed against IM's "Criterios de valoración" legend: same 5 definitions as Centro's
+  // own grado_proteccion, so this reuses G0-G4 rather than inventing a parallel scale.
+  assert.equal(parseCvGrado(0).code, 'G0');
+  assert.equal(parseCvGrado(1).code, 'G1');
+  assert.equal(parseCvGrado(4).code, 'G4');
+  // -1 and null both mean "not classified" on this source (grado_prot_2010 uses -1; one
+  // record uses null) - both fall through to SC, same "surveyed, no grade" semantics SC
+  // already carries for Centro's own ungraded parcels.
+  assert.equal(parseCvGrado(-1).code, 'SC');
+  assert.equal(parseCvGrado(null).code, 'SC');
 });
