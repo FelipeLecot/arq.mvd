@@ -147,7 +147,11 @@ test('Ciudad Vieja cv* fields are populated exactly where gradoSource says they 
   const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
   for (let i = 0; i < attrs.id.length; i++) {
     const hasCv = attrs.cvGrado2000[i] !== null || attrs.cvEstadoConsExt[i] !== null;
-    if (attrs.gradoSource[i] !== 'ciudad-vieja') {
+    if (attrs.gradoSource[i] === 'ciudad-vieja') {
+      // Measured 0/1743 exceptions: every ciudad-vieja-sourced parcel carries at least one
+      // of these two cv fields.
+      assert.ok(hasCv, `parcel ${i} is gradoSource ciudad-vieja but has neither cvGrado2000 nor cvEstadoConsExt`);
+    } else {
       assert.equal(attrs.cvBuildingName[i], null, `parcel ${i} has cvBuildingName without ciudad-vieja gradoSource`);
     }
   }
@@ -164,15 +168,24 @@ test('landmark fields (protectionType, direccion) ride alongside the existing ar
   const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
   const withArchitect = attrs.architect.filter((v) => v !== null).length;
   const withProtectionType = attrs.protectionType.filter((v) => v !== null).length;
+  const withDireccion = attrs.direccion.filter((v) => v !== null).length;
   assert.ok(withProtectionType >= withArchitect, 'protectionType (100% of landmark records) should be at least as common as architect (41%)');
+  // Measured: 1129 direccion vs 473 architect — direccion rides on the same landmark record
+  // set as protectionType, so it should be at least as common as the sparser architect field.
+  assert.ok(withDireccion >= withArchitect, 'direccion (declared-landmark records) should be at least as common as architect (41%)');
 });
 
 test('permit firstYear/totalArea/expediente are wired through and internally consistent', { skip }, () => {
   const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
   let violations = 0;
+  let totalAreaViolations = 0;
   for (let i = 0; i < attrs.id.length; i++) {
     if (attrs.firstPermitYear[i] != null && attrs.lastPermitYear[i] != null && attrs.firstPermitYear[i] > attrs.lastPermitYear[i]) violations++;
+    // Measured 0/22054 exceptions: a parcel with a summed totalPermitArea must actually have
+    // at least one permit on record — never a leftover sum with no permit count behind it.
+    if (attrs.totalPermitArea[i] != null && (attrs.permits[i] == null || attrs.permits[i] < 1)) totalAreaViolations++;
   }
   assert.equal(violations, 0);
+  assert.equal(totalAreaViolations, 0, 'totalPermitArea should never be set without a corresponding permits count');
   assert.ok(attrs.lastPermitExpediente.filter((v) => v !== null).length > 0, 'at least some permits should carry an expediente');
 });
