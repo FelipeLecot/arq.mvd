@@ -121,6 +121,44 @@ footprints) simplify away to zero area, which is `minWeight=100` behaving as spe
 only ever drawn at ~10 m/pixel; and `blockAttrs.parcelIds` ships ~1.4 MB the client never reads,
 kept deliberately so a block can be traced back to its members.
 
+## Ciudad Vieja heritage merge & field expansion (added 2026-08-07)
+
+`imm:pm_bienes_patrimoniales` from the live WFS (`geoserver.montevideo.gub.uy`) is a per-building
+heritage survey for Ciudad Vieja richer than Centro's own — three grade snapshots (1983/2000/2010),
+conservation state, building era, and floor-by-floor use codes. Wired 2026-08-07, sourced via a
+new WFS `kind` in `sources.mjs`/`fetch.mjs`. Measured on the final build:
+
+```
+Ciudad Vieja padrones matched:           1,743 (of 1,835 distinct in source; 91 never matched)
+Grade shift from merge:
+  Before:  G0=316, G1=1,743, G2=2,375, G3=590, G4=57, RG=3,875, SC=60, NA=199,846
+  After:   G0=537, G1=2,351, G2=2,981, G3=852, G4=102, RG=3,875, SC=61, NA=198,103
+  Delta:  +221 G0, +608 G1, +606 G2, +262 G3, +45 G4 (1,742 parcels regraded)
+
+Four additional sources now read new fields:
+  v_pat_mhn_bienespatrimoniales:  protectionType (1,131 parcels), decreto, nroEspacio
+  v_mdg_parcelas:                 areaTotal (208,828/208,862), areaCatastral, usoPredominante,
+                                  retiro, fos, fis, galibo, plan/categoria/promocion fields
+  permisos:                        lastPermitExpediente (22,054 parcels)
+  addresses (v_mdg_accesos):       door-number fix (see below)
+
+Coverage:  heritage detail 0.2%, permits 10.6%, addresses 99.5%
+```
+
+The merge consolidates three survey years (`grado_prot_1983`/`_2000`/`_2010`) into the shared
+`grado` field via `parseCvGrado` — same 0-4 scale as Centro, confirmed against IM's own legend
+(see `attrs.gradoSource` for source year per parcel). Every other Ciudad Vieja field ships raw
+(`cv`-prefixed in `attrs.json`): `estado_cons_ext`/`_int`, `epoca_ori`, `categoria`, `tipo_prop`,
+`reg_prop`, `uso_global_ori`/`_act`, floor-level `uso_ori_*`/`uso_act_*` (8 fields), and
+`intervenciones_*` (4 fields). No legend was found for these numeric codes despite checking IM's
+Ciudad Vieja portal.
+
+The door-number bug fix (originally Task 7, applied mid-cycle) repaired address parsing in
+`v_mdg_accesos`: the fallback chain checked wrong field names (`PUERTA`/`NRO_PUERTA`/`NRO`), missing
+the real field `NUM_PUERTA`. Door-number coverage jumped from ~0% (6,047 false positives from street
+names like "18 de Julio") to 100% (207,856 valid). This is a real, user-visible regression fix
+worth recording alongside the heritage data changes.
+
 ## Verified, live, in a browser
 
 Screenshots and a Playwright pass (2026-07-28) confirmed: no console errors, the new `NA` parcels
@@ -133,13 +171,6 @@ at once, only to pan into it. That's a front-end change, deliberately left out o
 
 ## Roadmap: not yet done
 
-- **Ciudad Vieja deep enrichment.** `imm:pm_bienes_patrimoniales` on the live WFS (see
-  `data-sources.md`) is a full per-building heritage survey for Ciudad Vieja, richer than Centro's
-  own — three grade snapshots (1983/2000/2010), conservation state, era, floor-by-floor use codes.
-  Not wired in yet: needs (a) a new WFS source `kind` in `sources.mjs`/`fetch.mjs` (a single
-  `GetFeature&outputFormat=application/json` GET, much simpler than the SHP generator's two-step
-  zip dance), and (b) a code legend for `grado_prot_*`/`uso_*`/`epoca_ori`/`categoria`/`tipo_prop`/
-  `reg_prop`, which are numeric codes with no legend fetched yet.
 - **Other barrios.** Pocitos, Carrasco, Punta Gorda, Prado, Peñarol, Reus Norte, Colón have no
   bulk per-building heritage survey in open data (confirmed gap, see `data-sources.md`) — they'll
   stay on the `NA`/legal-height treatment unless IM's Unidad de Protección del Patrimonio turns
