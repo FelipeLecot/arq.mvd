@@ -48,7 +48,8 @@ export class PickingLayer {
    *
    * A blend is a one-pixel island: the colour of a real parcel's interior repeats in the
    * neighbourhood, a blend's does not. So the centre pixel is trusted when its colour
-   * repeats nearby, and otherwise the nearest colour that does repeat wins.
+   * repeats nearby, and otherwise the nearest colour that does repeat within a 3×3 radius
+   * (squared distance ≤ 2) is accepted; beyond that, deselect rather than guess.
    */
   pick(x, y) {
     const cx = Math.floor(x);
@@ -85,7 +86,9 @@ export class PickingLayer {
       return colorToId(centre >> 16, (centre >> 8) & 0xff, centre & 0xff);
     }
 
-    // Centre is an antialias island — take the nearest colour that is actually solid.
+    // Centre is an antialias island — take the nearest colour that is actually solid,
+    // but only within a 3×3 neighbourhood (squared distance ≤ 2) to avoid snapping to
+    // unrelated neighbouring parcels.
     let best = 0;
     let bestDist = Infinity;
     for (let iy = 0; iy < h; iy++) {
@@ -95,7 +98,7 @@ export class PickingLayer {
         const dx = ix - (cx - x0);
         const dy = iy - (cy - y0);
         const d = dx * dx + dy * dy;
-        if (d < bestDist) {
+        if (d <= 2 && d < bestDist) {
           bestDist = d;
           best = c;
         }
