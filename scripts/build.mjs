@@ -20,7 +20,7 @@ import { feature, quantize } from 'topojson-client';
 import { DATA_DIR, RAW_DIR } from './paths.mjs';
 import { readBySuffix } from './zip.mjs';
 import { parsePermits } from './permits.mjs';
-import { parsePadron, parseSector, parseAltura, parseGrado, parsePotNumeric, GRADE_ORDER } from './normalize.mjs';
+import { parsePadron, parseSector, parseAltura, parseGrado, parsePotNumeric, parseCvGrado, cleanText, GRADE_ORDER } from './normalize.mjs';
 import { buildBlocks } from './blocks.mjs';
 import { projectGeometry, bbox } from './geo.mjs';
 
@@ -116,6 +116,48 @@ async function main() {
   }
   stats.heritageRecords = heritageByPadron.size;
 
+  // ---- Ciudad Vieja per-building heritage survey (pm_bienes_patrimoniales, WFS) -----------
+  // Confirmed 2026-08-07 disjoint from Centro's own inventory: only 2 of 1891 records fall
+  // inside the ámbito boundary, and both padrones are already covered by Centro's own curated
+  // grade in pass 1 below — so this map is only ever consulted for pass-2 POT parcels, never
+  // overrides Centro's own grade. See docs/superpowers/specs/2026-08-07-heritage-data-expansion-design.md.
+  const cvRaw = await readJson('pm_bienes_patrimoniales.json');
+  const cvHeritageByPadron = new Map();
+  const num = (v) => (Number.isFinite(v) ? v : null);
+  for (const f of cvRaw.features) {
+    const props = f.properties || {};
+    const padron = Number.isFinite(props.nro_padron) ? props.nro_padron : null;
+    if (padron === null || cvHeritageByPadron.has(padron)) continue; // first sector row wins, same rule as every other padrón-keyed join here
+    cvHeritageByPadron.set(padron, {
+      grado: parseCvGrado(props.grado_prot_2010).code,
+      grado1983: num(props.grado_prot_1983),
+      grado2000: num(props.grado_prot_2000),
+      estadoConsExt: num(props.estado_cons_ext),
+      estadoConsInt: num(props.estado_cons_int),
+      epoca: num(props.epoca_ori),
+      categoria: num(props.categoria),
+      tipoProp: num(props.tipo_prop),
+      regProp: num(props.reg_prop),
+      usoGlobalOri: num(props.uso_global_ori),
+      usoGlobalAct: num(props.uso_global_act),
+      usoOriSs: num(props.uso_ori_ss),
+      usoOriPb: num(props.uso_ori_pb),
+      usoOriEp: num(props.uso_ori_ep),
+      usoOriPa: num(props.uso_ori_pa),
+      usoActSs: num(props.uso_act_ss),
+      usoActPb: num(props.uso_act_pb),
+      usoActEp: num(props.uso_act_ep),
+      usoActPa: num(props.uso_act_pa),
+      intervencionesExtPb: num(props.intervenciones_ext_pb),
+      intervencionesExtPpaa: num(props.intervenciones_ext_ppaa),
+      intervencionesIntPb: num(props.intervenciones_int_pb),
+      intervencionesIntPpaa: num(props.intervenciones_int_ppaa),
+      buildingNameOrig: cleanText(props.denom_ori, ['-', 'sd']),
+      buildingName: cleanText(props.denom_act, ['-', 'sd']),
+    });
+  }
+  stats.cvHeritageRecords = cvHeritageByPadron.size;
+
   // ---- Parcels: Centro's own inventory first (curated geometry, heritage grade) ----------
   const invRaw = await readJson('inventario_patrimonial_centro.geojson');
   stats.centroSourceFeatures = invRaw.features.length;
@@ -132,6 +174,31 @@ async function main() {
     address: [],
     destino: [],
     gradoDetail: [],
+    gradoSource: [],
+    cvGrado1983: [],
+    cvGrado2000: [],
+    cvEstadoConsExt: [],
+    cvEstadoConsInt: [],
+    cvEpoca: [],
+    cvCategoria: [],
+    cvTipoProp: [],
+    cvRegProp: [],
+    cvUsoGlobalOri: [],
+    cvUsoGlobalAct: [],
+    cvUsoOriSs: [],
+    cvUsoOriPb: [],
+    cvUsoOriEp: [],
+    cvUsoOriPa: [],
+    cvUsoActSs: [],
+    cvUsoActPb: [],
+    cvUsoActEp: [],
+    cvUsoActPa: [],
+    cvIntervencionesExtPb: [],
+    cvIntervencionesExtPpaa: [],
+    cvIntervencionesIntPb: [],
+    cvIntervencionesIntPpaa: [],
+    cvBuildingNameOrig: [],
+    cvBuildingName: [],
     barrio: [],
     heritageName: [],
     architect: [],
@@ -145,7 +212,7 @@ async function main() {
   let nextId = 0;
   const dataBbox = [Infinity, Infinity, -Infinity, -Infinity];
 
-  function pushParcel({ geometry, padron, sector, grado, gradoDetail, altura }) {
+  function pushParcel({ geometry, padron, sector, grado, gradoDetail, gradoSource, altura, cv }) {
     const id = nextId++;
     const projected = projectGeometry(geometry);
     growBbox(dataBbox, projected);
@@ -171,6 +238,31 @@ async function main() {
     attrs.architect.push(heritage ? heritage.architect : null);
     attrs.builtDate.push(heritage ? heritage.builtDate : null);
     attrs.heritageDeclaration.push(heritage ? heritage.declaration : null);
+    attrs.gradoSource.push(gradoSource);
+    attrs.cvGrado1983.push(cv ? cv.grado1983 : null);
+    attrs.cvGrado2000.push(cv ? cv.grado2000 : null);
+    attrs.cvEstadoConsExt.push(cv ? cv.estadoConsExt : null);
+    attrs.cvEstadoConsInt.push(cv ? cv.estadoConsInt : null);
+    attrs.cvEpoca.push(cv ? cv.epoca : null);
+    attrs.cvCategoria.push(cv ? cv.categoria : null);
+    attrs.cvTipoProp.push(cv ? cv.tipoProp : null);
+    attrs.cvRegProp.push(cv ? cv.regProp : null);
+    attrs.cvUsoGlobalOri.push(cv ? cv.usoGlobalOri : null);
+    attrs.cvUsoGlobalAct.push(cv ? cv.usoGlobalAct : null);
+    attrs.cvUsoOriSs.push(cv ? cv.usoOriSs : null);
+    attrs.cvUsoOriPb.push(cv ? cv.usoOriPb : null);
+    attrs.cvUsoOriEp.push(cv ? cv.usoOriEp : null);
+    attrs.cvUsoOriPa.push(cv ? cv.usoOriPa : null);
+    attrs.cvUsoActSs.push(cv ? cv.usoActSs : null);
+    attrs.cvUsoActPb.push(cv ? cv.usoActPb : null);
+    attrs.cvUsoActEp.push(cv ? cv.usoActEp : null);
+    attrs.cvUsoActPa.push(cv ? cv.usoActPa : null);
+    attrs.cvIntervencionesExtPb.push(cv ? cv.intervencionesExtPb : null);
+    attrs.cvIntervencionesExtPpaa.push(cv ? cv.intervencionesExtPpaa : null);
+    attrs.cvIntervencionesIntPb.push(cv ? cv.intervencionesIntPb : null);
+    attrs.cvIntervencionesIntPpaa.push(cv ? cv.intervencionesIntPpaa : null);
+    attrs.cvBuildingNameOrig.push(cv ? cv.buildingNameOrig : null);
+    attrs.cvBuildingName.push(cv ? cv.buildingName : null);
   }
 
   const centroPadrones = new Set();
@@ -191,7 +283,9 @@ async function main() {
       sector: parseSector(props.padron_sector),
       grado: grado.code,
       gradoDetail: grado.detail,
+      gradoSource: 'centro',
       altura,
+      cv: null,
     });
   }
   stats.centroParcels = nextId;
@@ -201,13 +295,16 @@ async function main() {
   // ---- Citywide parcels: everything v_mdg_parcelas covers that Centro's inventory doesn't
   for (const pf of potFeatures) {
     if (pf.padron !== null && centroPadrones.has(pf.padron)) continue; // Centro's version wins.
+    const cv = pf.padron !== null ? cvHeritageByPadron.get(pf.padron) : null;
     pushParcel({
       geometry: pf.geometry,
       padron: pf.padron,
       sector: null,
-      grado: 'NA',
+      grado: cv ? cv.grado : 'NA',
       gradoDetail: null,
+      gradoSource: cv ? 'ciudad-vieja' : null,
       altura: pf.altura,
+      cv,
     });
   }
 
