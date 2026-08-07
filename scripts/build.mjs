@@ -125,15 +125,15 @@ async function main() {
     const props = f.properties || {};
     const padron = Number.parseInt(props.PADRON, 10);
     if (!Number.isFinite(padron) || heritageByPadron.has(padron)) continue;
-    const clean = (v) => {
-      const text = String(v ?? '').trim();
-      return text && text !== '-' ? text : null;
-    };
     heritageByPadron.set(padron, {
-      name: clean(props.IDENTIFICA),
-      architect: clean(props.AUTORIA),
-      builtDate: clean(props.FECHA),
-      declaration: clean(props.DECLARATOR),
+      name: cleanText(props.IDENTIFICA, ['-']),
+      architect: cleanText(props.AUTORIA, ['-']),
+      builtDate: cleanText(props.FECHA, ['-']),
+      declaration: cleanText(props.DECLARATOR, ['-']),
+      protectionType: cleanText(props.MHN, ['-']),
+      direccion: cleanText(props.DIRECCION, ['-']),
+      decreto: cleanText(props.DECRETO, ['-']),
+      nroEspacio: Number.isFinite(props.NRO_ESPACI) ? props.NRO_ESPACI : null,
     });
   }
   stats.heritageRecords = heritageByPadron.size;
@@ -245,6 +245,10 @@ async function main() {
     architect: [],
     builtDate: [],
     heritageDeclaration: [],
+    protectionType: [],
+    direccion: [],
+    decreto: [],
+    nroEspacio: [],
   };
 
   let alturaEspecial = 0;
@@ -298,6 +302,10 @@ async function main() {
     attrs.architect.push(heritage ? heritage.architect : null);
     attrs.builtDate.push(heritage ? heritage.builtDate : null);
     attrs.heritageDeclaration.push(heritage ? heritage.declaration : null);
+    attrs.protectionType.push(heritage ? heritage.protectionType : null);
+    attrs.direccion.push(heritage ? heritage.direccion : null);
+    attrs.decreto.push(heritage ? heritage.decreto : null);
+    attrs.nroEspacio.push(heritage ? heritage.nroEspacio : null);
     attrs.gradoSource.push(gradoSource);
     attrs.cvGrado1983.push(cv ? cv.grado1983 : null);
     attrs.cvGrado2000.push(cv ? cv.grado2000 : null);
