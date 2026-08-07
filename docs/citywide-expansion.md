@@ -146,10 +146,12 @@ Four additional sources now read new fields:
 Coverage:  heritage detail 0.2%, permits 10.6%, addresses 99.5%
 ```
 
-The merge consolidates three survey years into the shared `grado` field via `parseCvGrado` — same
-0-4 scale as Centro, confirmed against IM's own legend (see `attrs.gradoSource` for source year per
-parcel). Every other Ciudad Vieja field ships raw (`cv`-prefixed in `attrs.json`): `cvGrado1983`,
-`cvGrado2000` (raw 1983/2000 grades for reference), `cvBuildingNameOrig`, `cvBuildingName` (from
+The merge only consolidates the 2010 snapshot (`grado_prot_2010`) into the shared `grado` field via
+`parseCvGrado` — same 0-4 scale as Centro, confirmed against IM's own legend. `grado_prot_1983`/
+`grado_prot_2000` are never merged or used as a fallback; they ship raw as `attrs.cvGrado1983`/
+`attrs.cvGrado2000`. `attrs.gradoSource` records which *survey* graded a parcel (`'centro' |
+'ciudad-vieja' | null`), not which year. Every other Ciudad Vieja field ships raw (`cv`-prefixed in
+`attrs.json`), including those two raw grade years: `cvBuildingNameOrig`, `cvBuildingName` (from
 `denom_ori`/`denom_act`), `cvEstadoConsExt`/`_int`, `cvEpoca`, `cvCategoria`, `cvTipoProp`,
 `cvRegProp`, `cvUsoGlobalOri`/`_act`, floor-level `cvUsoOriSs`/`_pb`/`_ep`/`_pa` and
 `cvUsoActSs`/`_pb`/`_ep`/`_pa` (8 fields), and `cvIntervenciones*` (4 fields). No legend was found
@@ -181,6 +183,7 @@ at once, only to pan into it. That's a front-end change, deliberately left out o
   `AREA_DIFER` is ready to use as the barrio filter whenever a barrio-scoped view is needed.
 - **Front-end**: loosen `scaleExtent`/the initial fit so a full-city view is actually reachable;
   confirm CDN gzip on the larger JSON payloads; decide whether `barrio` (parsed and stored as
-  `attrs.barrio` but not yet visualized) gets its own map attribute. `FOS`/`FIS`/`RETIRO` exist on
-  `v_mdg_parcelas` (see `data-sources.md`) but aren't parsed at all yet — `scripts/build.mjs` only
-  reads `ALTURA` and `AREA_DIFER` off that source today.
+  `attrs.barrio` but not yet visualized) gets its own map attribute. `FOS`/`FIS`/`RETIRO` (and the
+  ~20 other POT planning fields listed in `data-sources.md`) are parsed into `attrs.json` as of
+  Task 5, but aren't *displayed* anywhere in the front-end/UI yet — only `grado`, `altura`, and
+  permits currently drive a map attribute.

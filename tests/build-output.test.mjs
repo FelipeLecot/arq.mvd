@@ -66,6 +66,17 @@ test('citywide coverage stats are internally consistent', { skip }, () => {
   assert.ok(meta.coverage.addressPct > 90, `address coverage regressed: ${meta.coverage.addressPct}%`);
 });
 
+test('addresses carry an actual door number, not just a street name', { skip }, () => {
+  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  // Regression guard for the NUM_PUERTA bug (Task 7): the old fallback chain
+  // (PUERTA/NRO_PUERTA/NRO) never matched v_mdg_accesos' real field, so every populated
+  // address was street-name-only and addressPct > 90 above would have passed even in that
+  // broken state. Measured on this build: 207,856/207,856 populated addresses contain a
+  // digit. A collapse toward 0 means the door-number fallback chain regressed again.
+  const withDigit = attrs.address.filter((a) => a && /\d/.test(a)).length;
+  assert.ok(withDigit > 200000, `expected >200k addresses with a door number, got ${withDigit}`);
+});
+
 test('geometry is projected into Web Mercator and spans the full city, not just Centro', { skip }, () => {
   const { meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
   const [minX, minY, maxX, maxY] = meta.bbox;
