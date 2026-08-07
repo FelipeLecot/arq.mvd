@@ -21,7 +21,7 @@ const BASE_PAD_PX = 24;
 // Below the zoom scale that fit was designed for, the viewport can span far more of the
 // citywide dataset, so draw merged blocks instead of individual parcels. Tune by watching
 // window.__atlas.perf.lastRedrawMs while panned into a dense area and zoomed to different scales.
-const BLOCK_LOD_MAX_K = 1;
+const BLOCK_LOD_MAX_K = 1.5;
 
 /**
  * Mercator-space viewport rectangle for the current screen transform, padded so a
