@@ -11,6 +11,7 @@ import { ATTRIBUTES } from './scales.js';
 import { renderLegend } from './legend.js';
 import { createHistogram, buildBins } from './histogram.js';
 import { createTitleBlock } from './hover.js';
+import { buildPadronIndex, findExact, findPrefix, parseQuery } from './search.js';
 
 // A little more than the largest legal envelope in the dataset — the query only needs to
 // not under-include; the precise per-item featureBounds check downstream is the real filter.
@@ -77,6 +78,10 @@ const state = {
   hoveredId: null,
   hoveredLod: null,
   selected: null,
+  // Set by a successful padrón search, independent of attribute-switching's `selected` —
+  // applyAttribute()/hist-clear must never reset this. It's the panel's default content;
+  // hover temporarily overrides the display but doesn't clear the pin (see onPointerMove).
+  searchSelectedId: null,
   interacting: false,
   needsRedraw: true,
 };
@@ -88,6 +93,11 @@ const stage = document.querySelector('.stage');
 const hint = document.getElementById('hint');
 const picking = new PickingLayer();
 const titleBlock = createTitleBlock(document.getElementById('titleblock'));
+const searchForm = document.getElementById('padron-search-form');
+const searchInput = document.getElementById('padron-input');
+const searchClear = document.getElementById('padron-clear');
+const searchResults = document.getElementById('padron-results');
+const searchStatus = document.getElementById('padron-status');
 
 const fmt = new Intl.NumberFormat('es-UY');
 
@@ -103,6 +113,7 @@ let colors;
 let heights;
 let histogram;
 let dpr = 1;
+let padronIndex;
 let blockItems;
 let blockIndex;
 let blockIdColors;
@@ -222,6 +233,7 @@ function redraw() {
       exaggeration,
       selected: state.selected,
       hoveredId: state.hoveredLod === 'parcel' ? state.hoveredId : null,
+      pinnedId: state.searchSelectedId,
       width: rect.width,
       height: rect.height,
     });
@@ -305,8 +317,15 @@ function onPointerMove(event) {
   state.needsRedraw = true;
 
   if (id == null) {
-    titleBlock.hide();
-    hint.style.opacity = '1';
+    // Falls back to the pinned search result rather than blanking the panel — the pin
+    // is the default content, hover is only a temporary override.
+    if (state.searchSelectedId != null) {
+      titleBlock.show(state.searchSelectedId, atlas.attrs);
+      hint.style.opacity = '0';
+    } else {
+      titleBlock.hide();
+      hint.style.opacity = '1';
+    }
   } else if (lastLod === 'block') {
     titleBlock.showBlock(id, atlas.blockAttrs);
     hint.style.opacity = '0';
@@ -351,6 +370,7 @@ async function main() {
   atlas = await loadAtlas();
 
   items = prepareFeatures(atlas.parcels);
+  padronIndex = buildPadronIndex(atlas.attrs.padron);
   lines = prepareLines(atlas.vias);
   ambitoItems = prepareFeatures(atlas.ambito.features);
   parcelIndex = buildIndex(items);
@@ -410,6 +430,153 @@ async function main() {
 
   select(mapCanvas).call(zoomBehavior);
 
+  /**
+   * Centre and zoom to a feature's Mercator bounds. The `k` floor sits well above
+   * BLOCK_LOD_MAX_K so every search result forces the parcel LOD, even when the map was
+   * zoomed out into blocks; the ceiling matches the zoom behavior's own scaleExtent.
+   * Skips the transition (jumps instantly) under prefers-reduced-motion, mirroring the
+   * reduced-motion rule in style.css.
+   */
+  function flyTo(id) {
+    const rect = stage.getBoundingClientRect();
+    const [minX, minY, maxX, maxY] = items[id].bounds;
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const spanX = Math.max(maxX - minX, 1e-6);
+    const spanY = Math.max(maxY - minY, 1e-6);
+
+    const projScale = projection.scale();
+    const [projTx, projTy] = projection.translate();
+
+    // Frame the parcel with context around it rather than filling the viewport edge to
+    // edge; the floor/ceiling below can still override this fit.
+    const pad = 140;
+    const naturalK = Math.min(
+      (rect.width - 2 * pad) / (spanX * projScale),
+      (rect.height - 2 * pad) / (spanY * projScale),
+    );
+    const k = Math.min(60, Math.max(8, naturalK));
+
+    const a = projScale * k;
+    const x = rect.width / 2 - cx * a - projTx * k;
+    const y = rect.height / 2 + cy * a - projTy * k;
+    const target = zoomIdentity.translate(x, y).scale(k);
+
+    const selection = select(mapCanvas);
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      selection.call(zoomBehavior.transform, target);
+    } else {
+      selection.transition().duration(600).call(zoomBehavior.transform, target);
+    }
+  }
+
+  /** Empty the disambiguation/suggestion list and hide the status message. */
+  function hideSearchFeedback() {
+    searchResults.hidden = true;
+    searchResults.innerHTML = '';
+    searchStatus.hidden = true;
+  }
+
+  /** Pin a feature as the search result: default panel content, flies the map to it. */
+  function selectSearchResult(id) {
+    state.searchSelectedId = id;
+    titleBlock.show(id, atlas.attrs);
+    hint.style.opacity = '0';
+    flyTo(id);
+    state.needsRedraw = true;
+    hideSearchFeedback();
+    searchClear.hidden = false;
+  }
+
+  /** Disambiguation list for a padrón with sector-variant duplicates — one row per id. */
+  function renderDisambiguation(ids) {
+    searchResults.innerHTML = '';
+    for (const id of ids) {
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      const sector = atlas.attrs.sector[id];
+      const padron = atlas.attrs.padron[id];
+      const address = atlas.attrs.address[id] ?? 'Sin dirección registrada';
+      btn.textContent = sector ? `${padron} ${sector} — ${address}` : `${padron} — ${address}`;
+      btn.addEventListener('click', () => selectSearchResult(id));
+      li.appendChild(btn);
+      searchResults.appendChild(li);
+    }
+    searchStatus.hidden = true;
+    searchResults.hidden = ids.length === 0;
+  }
+
+  /** Live suggestions for a partial numeric query, shown while typing. */
+  function renderSuggestions(padrones) {
+    searchResults.innerHTML = '';
+    for (const padron of padrones) {
+      const li = document.createElement('li');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = String(padron);
+      btn.addEventListener('click', () => {
+        searchInput.value = String(padron);
+        runSearch(padron);
+      });
+      li.appendChild(btn);
+      searchResults.appendChild(li);
+    }
+    searchStatus.hidden = true;
+    searchResults.hidden = padrones.length === 0;
+  }
+
+  /** Exact search for a padrón number — zero, one, or many (sector duplicates) results. */
+  function runSearch(padron) {
+    const ids = findExact(padronIndex, padron);
+    if (ids.length === 0) {
+      searchResults.hidden = true;
+      searchResults.innerHTML = '';
+      searchStatus.hidden = false;
+      searchStatus.textContent = 'Sin resultados';
+      return;
+    }
+    if (ids.length === 1) {
+      selectSearchResult(ids[0]);
+      return;
+    }
+    renderDisambiguation(ids);
+  }
+
+  searchInput.addEventListener('input', () => {
+    const digits = searchInput.value.replace(/\D/g, '');
+    if (digits.length < 2) {
+      hideSearchFeedback();
+      return;
+    }
+    renderSuggestions(findPrefix(padronIndex, digits, 8));
+  });
+
+  searchForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const padron = parseQuery(searchInput.value);
+    if (padron == null) {
+      searchResults.hidden = true;
+      searchResults.innerHTML = '';
+      searchStatus.hidden = false;
+      searchStatus.textContent = 'Ingresá un número de padrón';
+      return;
+    }
+    runSearch(padron);
+  });
+
+  searchClear.addEventListener('click', () => {
+    state.searchSelectedId = null;
+    searchInput.value = '';
+    searchClear.hidden = true;
+    hideSearchFeedback();
+    if (state.hoveredId == null) {
+      titleBlock.hide();
+      hint.style.opacity = '1';
+    }
+    state.needsRedraw = true;
+  });
+
   const restored = readHash();
   if (restored) {
     setAttribute(restored.attr);
@@ -419,8 +586,13 @@ async function main() {
   mapCanvas.addEventListener('pointermove', onPointerMove);
   mapCanvas.addEventListener('pointerleave', () => {
     state.hoveredId = null;
-    titleBlock.hide();
-    hint.style.opacity = '1';
+    if (state.searchSelectedId != null) {
+      titleBlock.show(state.searchSelectedId, atlas.attrs);
+      hint.style.opacity = '0';
+    } else {
+      titleBlock.hide();
+      hint.style.opacity = '1';
+    }
     state.needsRedraw = true;
   });
 

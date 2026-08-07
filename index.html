@@ -24,6 +24,15 @@
       <input type="checkbox" id="extrude-toggle" checked>
       <span>Volumen</span>
     </label>
+    <form class="search" id="padron-search-form" role="search">
+      <label class="search__label" for="padron-input">Padrón</label>
+      <div class="search__field">
+        <input type="text" id="padron-input" inputmode="numeric" autocomplete="off" placeholder="N.º de padrón">
+        <button type="button" id="padron-clear" class="search__clear" hidden aria-label="Quitar selección">✕</button>
+      </div>
+      <ul class="search__results" id="padron-results" hidden></ul>
+      <p class="search__status" id="padron-status" hidden aria-live="polite"></p>
+    </form>
   </div>
 </header>
 

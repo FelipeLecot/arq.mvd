@@ -34,6 +34,10 @@
 
   --focus: #FFD873;
 
+  /* Cool accent for the search pin — distinct from the amber ramp above, which is
+     reserved for the heritage-grade data encoding and hover. */
+  --pin: #5AC8FA;
+
   --font-display: 'Century Gothic', 'Futura', 'Avenir Next', 'URW Gothic', 'Questrial', system-ui, sans-serif;
   --font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'Consolas', 'SF Mono', 'Menlo', 'DejaVu Sans Mono', monospace;
@@ -163,6 +167,98 @@ h1, h2 { margin: 0; font-weight: 400; }
 }
 
 .toggle input { accent-color: var(--g4); cursor: pointer; }
+
+/* ---------- padrón search ---------- */
+
+.search { position: relative; display: flex; align-items: center; gap: 0.5rem; }
+
+.search__label {
+  font-family: var(--font-display);
+  font-size: 0.625rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--bone-dim);
+}
+
+.search__field {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--rule);
+  background: var(--panel-2);
+}
+
+.search__field input {
+  background: none;
+  border: 0;
+  color: var(--bone);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 0.4rem 0.6rem;
+  width: 8rem;
+}
+
+.search__field input::placeholder { color: var(--muted); }
+
+.search__clear {
+  background: none;
+  border: 0;
+  border-left: 1px solid var(--rule);
+  color: var(--bone-dim);
+  font-size: 0.75rem;
+  line-height: 1;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  transition: color 120ms;
+}
+
+.search__clear:hover { color: var(--pin); }
+
+.search__results {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 10;
+  min-width: 15rem;
+  max-height: 16rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--rule-bright);
+  box-shadow: 0 8px 28px #00000073;
+}
+
+.search__results button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  color: var(--bone);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 0.45rem 0.65rem;
+  cursor: pointer;
+}
+
+.search__results li:last-child button { border-bottom: 0; }
+.search__results button:hover { background: var(--panel-2); color: var(--pin); }
+
+.search__status {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 10;
+  margin: 0;
+  padding: 0.45rem 0.65rem;
+  background: var(--panel);
+  border: 1px solid var(--rule-bright);
+  font-size: 0.75rem;
+  color: var(--bone-dim);
+  white-space: nowrap;
+}
 
 :where(button, input, canvas, [tabindex]):focus-visible {
   outline: 2px solid var(--focus);

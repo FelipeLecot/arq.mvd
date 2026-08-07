@@ -123,6 +123,7 @@ export function drawParcels(ctx, items, t, opts) {
     exaggeration = 1,
     selected,
     hoveredId,
+    pinnedId,
     width,
     height,
     idColors,
@@ -175,6 +176,14 @@ export function drawParcels(ctx, items, t, opts) {
     if (maxX - minX > 2.5 && isSelected) {
       ctx.strokeStyle = 'rgba(14,18,25,0.55)';
       ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
+
+    // The search pin is a persistent marker, independent of hover — a cool accent keeps
+    // it legible against the hover highlight's warm amber when the same parcel is both.
+    if (id === pinnedId) {
+      ctx.strokeStyle = '#5AC8FA';
+      ctx.lineWidth = 1.75;
       ctx.stroke();
     }
 
