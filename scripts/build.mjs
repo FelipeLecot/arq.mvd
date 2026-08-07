@@ -70,8 +70,15 @@ async function main() {
     const padron = Number.parseInt(props.PADRON ?? props.padron, 10);
     if (!Number.isFinite(padron) || addressByPadron.has(padron)) continue;
     const calle = String(props.CALLE ?? props.NOM_CALLE ?? '').trim();
-    const nro = String(props.PUERTA ?? props.NRO_PUERTA ?? props.NRO ?? '').trim();
-    if (calle) addressByPadron.set(padron, nro ? `${calle} ${nro}` : calle);
+    // NUM_PUERTA is the actual door-number field on v_mdg_accesos; PUERTA/NRO_PUERTA/NRO never
+    // matched anything (pre-existing bug, surfaced by Task 7's verification, fixed here with
+    // project-owner sign-off rather than deferred) — kept as harmless fallbacks for other exports.
+    const nro = String(props.PUERTA ?? props.NRO_PUERTA ?? props.NUM_PUERTA ?? props.NRO ?? '').trim();
+    const letra = String(props.LETRA ?? '').trim();
+    if (calle) {
+      const door = nro ? `${nro}${letra ? ` ${letra}` : ''}` : '';
+      addressByPadron.set(padron, door ? `${calle} ${door}` : calle);
+    }
   }
   stats.addresses = addressByPadron.size;
 
@@ -193,6 +200,9 @@ async function main() {
     altura: [],
     permits: [],
     lastPermitYear: [],
+    firstPermitYear: [],
+    totalPermitArea: [],
+    lastPermitExpediente: [],
     address: [],
     destino: [],
     gradoDetail: [],
@@ -275,6 +285,9 @@ async function main() {
     attrs.altura.push(altura);
     attrs.permits.push(permit ? permit.count : 0);
     attrs.lastPermitYear.push(permit ? permit.lastYear : null);
+    attrs.firstPermitYear.push(permit ? permit.firstYear : null);
+    attrs.totalPermitArea.push(permit ? permit.totalArea : null);
+    attrs.lastPermitExpediente.push(permit ? permit.expediente : null);
     attrs.address.push(padron !== null ? addressByPadron.get(padron) ?? null : null);
     attrs.destino.push(permit ? permit.destino : null);
     attrs.gradoDetail.push(gradoDetail);
