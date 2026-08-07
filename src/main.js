@@ -383,13 +383,15 @@ async function main() {
   sizeCanvases();
   applyAttribute();
 
-  // Coverage, stated plainly: this atlas covers Centro, not Montevideo.
+  // Coverage, stated plainly: two tiers, citywide POT parcels and Centro's heritage subset.
   const { meta } = atlas;
   document.getElementById('coverage').innerHTML =
-    `<strong>${fmt.format(meta.counts.parcels)} padrones</strong> del Inventario Patrimonial del Centro ` +
-    `(decreto 39.085) — no toda la ciudad. Altura y grado cubren el 100%; ` +
-    `obras, el ${meta.coverage.permitPct}%. ` +
-    `${meta.coverage.alturaEspecial} padrones tienen altura especial, sin valor numérico.`;
+    `<strong>${fmt.format(meta.counts.parcels)} padrones</strong> de toda la ciudad (POT — Plan de ` +
+    `Ordenamiento Territorial), de los cuales ${fmt.format(meta.coverage.centroParcels)} (Centro) ` +
+    `tienen grado de protección patrimonial real (decreto 39.085, 100% de cobertura allí). Altura ` +
+    `normativa cubre el 100% de la ciudad; obras, el ${meta.coverage.permitPct}%. ` +
+    `${fmt.format(meta.coverage.alturaEspecial)} padrones tienen altura especial, sin valor numérico ` +
+    `(${fmt.format(meta.coverage.centroAlturaEspecial)} de ellos dentro del Centro).`;
 
   const zoomBehavior = d3zoom()
     .scaleExtent([0.6, 60])

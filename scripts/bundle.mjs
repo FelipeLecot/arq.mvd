@@ -58,6 +58,6 @@ if (!serve) {
       res.writeHead(404).end('not found');
     }
   }).listen(PORT, () => {
-    console.log(`\n  Atlas del Centro — http://localhost:${PORT}\n`);
+    console.log(`\n  Atlas de Montevideo — http://localhost:${PORT}\n`);
   });
 }

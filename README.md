@@ -24,8 +24,8 @@ npm run dev          # http://localhost:5173
 ## Controls
 
 Drag to pan, wheel to zoom, hover to inspect a parcel. North is always up. Below a zoom threshold
-the map draws merged city blocks instead of individual parcels (I had troble rendering all at once) legible and cheap at a scale
-where a single lot line stops meaning anything.
+the map swaps individual parcels for merged city blocks — cheap to draw and still legible at a
+scale where a single lot line stops meaning anything.
 
 ## Coverage: two tiers, for one reason
 

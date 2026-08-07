@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Architectural atlas of Centro, Montevideo — parcels drawn from Intendencia vector data",
+  "description": "Architectural atlas of Montevideo — citywide parcel and height data (POT), with Centro's curated heritage-protection inventory as a documented subset",
   "scripts": {
     "fetch": "node scripts/fetch.mjs",
     "build:data": "node scripts/build.mjs",
