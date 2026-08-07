@@ -7,7 +7,7 @@
 import { mkdir, writeFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RAW_DIR } from './paths.mjs';
-import { SOURCES, SHP_GEN, SHP_TMP } from './sources.mjs';
+import { SOURCES, SHP_GEN, SHP_TMP, WFS_BASE } from './sources.mjs';
 
 const UA = 'Mozilla/5.0 (mvd-map data pipeline)';
 const force = process.argv.includes('--force');
@@ -48,6 +48,17 @@ async function download(source) {
     // A missing table returns a ~300 byte HTML 404 page rather than a zip.
     if (buf.length < 1000 || buf[0] !== 0x50 || buf[1] !== 0x4b) {
       throw new Error(`${source.table}: expected a zip, got ${buf.length} bytes of non-zip`);
+    }
+  } else if (source.kind === 'wfs') {
+    // A WFS error comes back as an XML ExceptionReport with HTTP 200, not a clean failure —
+    // check the body actually looks like the JSON GetFeature response asked for, the same
+    // "don't trust a 200" discipline the shpgen branch applies via its zip-magic-number check.
+    buf = await get(
+      `${WFS_BASE}?service=wfs&version=2.0.0&request=GetFeature&typeName=${source.typeName}&outputFormat=application/json`,
+    );
+    const head = buf.toString('utf8', 0, 20).trimStart();
+    if (!head.startsWith('{')) {
+      throw new Error(`${source.typeName}: expected JSON, got: ${buf.toString('utf8', 0, 200)}`);
     }
   } else {
     buf = await get(source.url);

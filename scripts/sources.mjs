@@ -11,6 +11,10 @@
 export const SHP_GEN = 'https://intgis.montevideo.gub.uy/sit/php/common/datos/generar_zip2.php';
 export const SHP_TMP = 'https://intgis.montevideo.gub.uy/sit/tmp';
 
+// A separate, live GeoServer WFS instance (confirmed 2026-07-28; do not confuse with the dead
+// geoweb.montevideo.gub.uy host). Single-GET GeoJSON, no shapefile/latin1 step.
+export const WFS_BASE = 'https://geoserver.montevideo.gub.uy/geoserver/ows';
+
 const CKAN_INV = 'https://ckan-data.montevideo.gub.uy/dataset/e8cbc599-210d-47fa-810d-f6e61ef4ee2d';
 
 export const SOURCES = [
@@ -67,5 +71,16 @@ export const SOURCES = [
     kind: 'shpgen',
     table: 'v_pat_mhn_bienespatrimoniales',
     note: '1195 citywide declared heritage records — AUTORIA, FECHA, DECLARATOR, DIRECCION.',
+  },
+  {
+    // Ciudad Vieja's own per-building heritage survey — richer than Centro's inventory (three
+    // grade snapshots, conservation state, era, floor-by-floor use). Confirmed live 2026-08-07:
+    // 1891 records, EPSG:32721. Disjoint from Centro's inventory (only 2 of 1891 records fall
+    // inside its ámbito) — see docs/superpowers/specs/2026-08-07-heritage-data-expansion-design.md.
+    id: 'ciudadViejaPatrimonio',
+    kind: 'wfs',
+    typeName: 'imm:pm_bienes_patrimoniales',
+    file: 'pm_bienes_patrimoniales.json',
+    note: '1891 records, EPSG:32721 — grado_prot_1983/2000/2010, estado_cons, epoca, uso codes.',
   },
 ];
