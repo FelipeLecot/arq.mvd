@@ -77,7 +77,7 @@ export function idToColor(id) {
  * sentinel (0). Context-free: unlike PickingLayer.pick(), this has no notion of which ids
  * are actually on screen this frame, so a value that arose from blending two real colours
  * together will still decode to *some* id here — this is a diagnostic/test utility, not
- * the thing that makes hit-testing correct. See PICK_MULT's docstring above.
+ * the thing that makes hit-testing correct. See PACK_MULT's docstring above.
  */
 export function colorToId(r, g, b) {
   const n = (r << 16) | (g << 8) | b;

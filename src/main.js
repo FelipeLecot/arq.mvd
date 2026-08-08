@@ -455,14 +455,13 @@ async function main() {
   const zoomBehavior = d3zoom()
     .scaleExtent([0.6, 60])
     .filter((event) => {
-      // Scroll/pinch-to-zoom (wheel) and touch/pen panning (touchstart) are unaffected —
-      // d3-zoom only ever calls this filter for 'wheel', 'mousedown', 'dblclick', and
-      // 'touchstart' event types (checked against the installed d3-zoom v3 source), so
-      // gating on event.type here is exhaustive and doesn't depend on PointerEvent-only
-      // properties like pointerType, which a real TouchEvent never has.
-      if (event.type === 'wheel' || event.type === 'touchstart') return true;
-      // Mouse-driven drag-panning (mousedown) and double-click-zoom (dblclick) are
-      // restricted to the middle button, freeing the left button for click-to-select.
+      // Scroll/pinch-to-zoom (wheel), touch/pen panning (touchstart), and double-click-zoom
+      // (dblclick) are all unaffected by the middle-button-pan restriction below — d3-zoom
+      // only ever calls this filter for these four event types, checked against the
+      // installed d3-zoom v3 source (node_modules/d3-zoom/src/zoom.js).
+      if (event.type === 'wheel' || event.type === 'touchstart' || event.type === 'dblclick') return true;
+      // Mouse-driven drag-panning (mousedown) is restricted to the middle button, freeing
+      // the left button for click-to-select.
       return event.button === 1;
     })
     .on('start', () => {
@@ -801,4 +800,6 @@ async function main() {
 
 main().catch((err) => {
   console.error(err);
+  hint.textContent = `No se pudieron cargar los datos: ${err.message}`;
+  hint.style.opacity = '1';
 });

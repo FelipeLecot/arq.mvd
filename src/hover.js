@@ -12,6 +12,12 @@
 
 import { GRADE_COLORS, GRADE_LABELS, ATTRIBUTES } from './scales.js';
 
+/** Safe positional read: null if the array itself is missing (e.g. an older attrs.json
+ * that predates this field), not just if the value at this id is null. */
+function at(arr, id) {
+  return arr ? arr[id] ?? null : null;
+}
+
 /** One <dl> of label/value rows, skipping null values; null if nothing survives. */
 function buildRows(pairs) {
   const present = pairs.filter(([, value]) => value != null);
@@ -55,9 +61,9 @@ function gradeCode(n) {
  * 2026-08-07-heritage-data-expansion-design.md §3) and is treated the same as null.
  */
 function buildCvGroup(id, attrs) {
-  const nameAct = attrs.cvBuildingName[id];
-  const nameOri = attrs.cvBuildingNameOrig[id];
-  const isCv = attrs.gradoSource[id] === 'ciudad-vieja';
+  const nameAct = at(attrs.cvBuildingName, id);
+  const nameOri = at(attrs.cvBuildingNameOrig, id);
+  const isCv = at(attrs.gradoSource, id) === 'ciudad-vieja';
   if (nameAct == null && nameOri == null && !isCv) return null;
 
   const pairs = [];
@@ -68,8 +74,8 @@ function buildCvGroup(id, attrs) {
   }
 
   const history = [];
-  const g1983 = attrs.cvGrado1983[id];
-  const g2000 = attrs.cvGrado2000[id];
+  const g1983 = at(attrs.cvGrado1983, id);
+  const g2000 = at(attrs.cvGrado2000, id);
   if (g1983 != null && g1983 >= 0) history.push(`1983 ${gradeCode(g1983)}`);
   if (g2000 != null && g2000 >= 0) history.push(`2000 ${gradeCode(g2000)}`);
   if (isCv) history.push(`2010 ${attrs.grado[id]} (actual)`);
@@ -124,12 +130,12 @@ export function createTitleBlock(root) {
 
     const groups = [];
     const heritageGroup = buildGroup('Declaratoria patrimonial', [
-      ['Nombre', attrs.heritageName[id]],
-      ['Arquitecto', attrs.architect[id]],
-      ['Año', attrs.builtDate[id]],
-      ['Declaratoria', attrs.heritageDeclaration[id]],
-      ['Tipo de protección', attrs.protectionType[id]],
-      ['Decreto', attrs.decreto[id]],
+      ['Nombre', at(attrs.heritageName, id)],
+      ['Arquitecto', at(attrs.architect, id)],
+      ['Año', at(attrs.builtDate, id)],
+      ['Declaratoria', at(attrs.heritageDeclaration, id)],
+      ['Tipo de protección', at(attrs.protectionType, id)],
+      ['Decreto', at(attrs.decreto, id)],
     ]);
     if (heritageGroup) groups.push(heritageGroup);
 
