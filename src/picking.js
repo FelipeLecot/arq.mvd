@@ -8,15 +8,37 @@
  * extruded building would be wrong by the height of the building.
  */
 
+// Packed ids are spaced apart by this factor rather than assigned consecutive integers.
+// Canvas antialiases every path edge, and a fill/stroke pair drawn over an already-opaque
+// neighbour blends the two RGB colours at whatever fractional coverage the rasterizer
+// computed — round(idA*coverage + idB*(1-coverage)) is, in general, some THIRD integer.
+// With ids packed as consecutive integers (spacing 1), every integer in range belongs to
+// some real feature, so that blended integer is *always* another real, arbitrary id — every
+// antialiased edge pixel decodes to a parcel unrelated to either of its true neighbours,
+// silently. Spacing ids apart means only 1 in SPACING possible rounded outcomes lands back
+// on a real id; the other (SPACING-1)/SPACING blends round to a value nobody owns, which
+// colorToId now reports as invalid rather than as a fabricated pick. See pick() for how
+// that plays into rejecting contaminated pixels. 32 keeps the packed value comfortably
+// inside 24 bits (16,777,215) up to roughly 500k features — the citywide dataset is ~209k.
+const ID_SPACING = 32;
+
 export function idToColor(id) {
   // +1 so id 0 is not black, which is the "nothing here" background.
-  const n = id + 1;
+  const n = (id + 1) * ID_SPACING;
   return `rgb(${(n >> 16) & 0xff},${(n >> 8) & 0xff},${n & 0xff})`;
 }
 
+/**
+ * Decode a packed colour back to a feature id, or null if it isn't a genuine one.
+ *
+ * Only exact multiples of ID_SPACING were ever assigned to a real feature — anything else
+ * is background (n === 0) or the product of antialiasing blending two real ids together
+ * (see ID_SPACING above). Both cases mean "nothing trustworthy was read here", so both
+ * return null; the caller decides whether to treat that as "nothing" or search nearby.
+ */
 export function colorToId(r, g, b) {
   const n = (r << 16) | (g << 8) | b;
-  return n === 0 ? null : n - 1;
+  return n === 0 || n % ID_SPACING !== 0 ? null : n / ID_SPACING - 1;
 }
 
 export class PickingLayer {
@@ -41,13 +63,18 @@ export class PickingLayer {
   /**
    * Read the feature id under a CSS-pixel coordinate, or null.
    *
-   * Canvas antialiases every polygon edge, and an id colour is a bit-packed integer, so
-   * a blended boundary pixel decodes to a THIRD parcel unrelated to either neighbour.
-   * At city zoom roughly 44% of foreground pixels are such blends — reading a single
-   * pixel there returns the wrong padrón nearly half the time.
+   * Canvas antialiases every polygon edge, and (before ID_SPACING, see picking.js's top)
+   * an id colour was a bit-packed integer with no gaps, so a blended boundary pixel always
+   * decoded to a THIRD parcel unrelated to either neighbour. At city zoom roughly 44% of
+   * foreground pixels are such blends.
    *
-   * A blend is a one-pixel island: the colour of a real parcel's interior repeats in the
-   * neighbourhood, a blend's does not. So the centre pixel is trusted when its colour
+   * Two independent defences, not one: `decode()` throws out any pixel whose colour isn't
+   * an exact multiple of ID_SPACING — most blends land off-grid and are caught here, cheaply,
+   * before locality even comes into it. What's left is a *rare* blend that still happens to
+   * land back on some other real id's exact colour. For that residual case a blend is
+   * usually a thin antialiased band (a stroke's own ~1.5px-wide edge, or a fill boundary),
+   * not a wide one — a real parcel's *interior*, away from any edge, has its colour
+   * repeated all through the neighbourhood, so the centre is trusted only when its colour
    * repeats nearby, and otherwise the nearest colour that does repeat within a 3×3 radius
    * (squared distance ≤ 2) is accepted; beyond that, deselect rather than guess.
    */
@@ -70,31 +97,35 @@ export class PickingLayer {
       const i = (iy * w + ix) * 4;
       return (data[i] << 16) | (data[i + 1] << 8) | data[i + 2];
     };
+    // Background (0) or off-grid (not a multiple of ID_SPACING) both mean "not a real,
+    // uncontaminated id colour" — see ID_SPACING's docstring. Neither is ever a candidate
+    // answer, and neither counts toward another colour's "repeats nearby" tally.
+    const isRealId = (c) => c !== 0 && c % ID_SPACING === 0;
 
     const counts = new Map();
     for (let iy = 0; iy < h; iy++) {
       for (let ix = 0; ix < w; ix++) {
         const c = at(ix, iy);
-        if (c !== 0) counts.set(c, (counts.get(c) ?? 0) + 1);
+        if (isRealId(c)) counts.set(c, (counts.get(c) ?? 0) + 1);
       }
     }
 
     const centre = at(cx - x0, cy - y0);
     // Genuine background — a street or the edge of the ámbito — selects nothing.
     if (centre === 0) return null;
-    if ((counts.get(centre) ?? 0) >= 2) {
+    if (isRealId(centre) && (counts.get(centre) ?? 0) >= 2) {
       return colorToId(centre >> 16, (centre >> 8) & 0xff, centre & 0xff);
     }
 
-    // Centre is an antialias island — take the nearest colour that is actually solid,
-    // but only within a 3×3 neighbourhood (squared distance ≤ 2) to avoid snapping to
-    // unrelated neighbouring parcels.
+    // Centre is off-grid or an antialias island — take the nearest colour that is both a
+    // real id and actually solid, but only within a 3×3 neighbourhood (squared distance
+    // ≤ 2) to avoid snapping to unrelated neighbouring parcels.
     let best = 0;
     let bestDist = Infinity;
     for (let iy = 0; iy < h; iy++) {
       for (let ix = 0; ix < w; ix++) {
         const c = at(ix, iy);
-        if (c === 0 || (counts.get(c) ?? 0) < 2) continue;
+        if (!isRealId(c) || (counts.get(c) ?? 0) < 2) continue;
         const dx = ix - (cx - x0);
         const dy = iy - (cy - y0);
         const d = dx * dx + dy * dy;
