@@ -416,19 +416,6 @@ h1, h2 { margin: 0; font-weight: 400; }
   min-height: 1em;
 }
 
-/* ---------- provenance ---------- */
-
-.provenance { flex: 0 0 15rem; overflow-y: auto; }
-
-.provenance p {
-  margin: 0;
-  font-size: 0.6875rem;
-  line-height: 1.5;
-  color: var(--muted);
-}
-
-.provenance strong { color: var(--bone-dim); font-weight: 400; }
-
 /* ---------- responsive ---------- */
 
 @media (max-width: 900px) {
@@ -438,7 +425,7 @@ h1, h2 { margin: 0; font-weight: 400; }
     border-left: 0;
     border-top: 1px solid var(--rule);
   }
-  .legend, .provenance { flex: none; }
+  .legend { flex: none; }
   .titleblock { left: 1.25rem; right: 1.25rem; width: auto; }
 }
 
