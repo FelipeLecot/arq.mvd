@@ -447,6 +447,14 @@ async function main() {
 
   const zoomBehavior = d3zoom()
     .scaleExtent([0.6, 60])
+    .filter((event) => {
+      // Scroll/pinch-to-zoom and touch/pen panning are unaffected — this only restricts
+      // mouse-driven drag-panning to the middle button, freeing the left button for
+      // click-to-select (see the click listener below).
+      if (event.type === 'wheel') return true;
+      if (event.pointerType && event.pointerType !== 'mouse') return true;
+      return event.button === 1;
+    })
     .on('start', () => {
       state.interacting = true;
     })
@@ -461,6 +469,12 @@ async function main() {
     });
 
   select(mapCanvas).call(zoomBehavior);
+
+  // Windows/Linux browsers otherwise enter native autoscroll mode on a middle-button press
+  // over a non-scrolling element, which fights with d3-zoom's own drag handling.
+  mapCanvas.addEventListener('mousedown', (event) => {
+    if (event.button === 1) event.preventDefault();
+  });
 
   /**
    * Centre and zoom to a feature's Mercator bounds. The `k` floor of 8 keeps the
@@ -510,15 +524,40 @@ async function main() {
     searchStatus.hidden = true;
   }
 
-  /** Pin a feature as the search result: default panel content, flies the map to it. */
-  function selectSearchResult(id) {
+  /**
+   * Pin a feature as the search result / map selection: default panel content that
+   * persists through hover (see onPointerMove's fallback), however it was selected. Syncs
+   * the padrón input so there's one consistent way to see/clear whatever is pinned.
+   */
+  function pinFeature(id, { fly }) {
     state.searchSelectedId = id;
     titleBlock.show(id, atlas.attrs);
     hint.style.opacity = '0';
-    flyTo(id);
-    state.needsRedraw = true;
-    hideSearchFeedback();
+    const sector = atlas.attrs.sector[id];
+    const padron = atlas.attrs.padron[id];
+    searchInput.value = sector ? `${padron} ${sector}` : String(padron);
     searchClear.hidden = false;
+    hideSearchFeedback();
+    if (fly) flyTo(id);
+    state.needsRedraw = true;
+  }
+
+  /** Clear the current pin, whether it came from search or a map click. */
+  function clearSelection() {
+    state.searchSelectedId = null;
+    searchInput.value = '';
+    searchClear.hidden = true;
+    hideSearchFeedback();
+    if (state.hoveredId == null) {
+      titleBlock.hide();
+      hint.style.opacity = '1';
+    }
+    state.needsRedraw = true;
+  }
+
+  /** A search result always flies the map to frame it. */
+  function selectSearchResult(id) {
+    pinFeature(id, { fly: true });
   }
 
   /** Disambiguation list for a padrón with sector-variant duplicates — one row per id. */
@@ -631,17 +670,7 @@ async function main() {
     renderDisambiguation(ids);
   });
 
-  searchClear.addEventListener('click', () => {
-    state.searchSelectedId = null;
-    searchInput.value = '';
-    searchClear.hidden = true;
-    hideSearchFeedback();
-    if (state.hoveredId == null) {
-      titleBlock.hide();
-      hint.style.opacity = '1';
-    }
-    state.needsRedraw = true;
-  });
+  searchClear.addEventListener('click', clearSelection);
 
   // The suggestions/disambiguation dropdown otherwise only closes on submit, on explicit
   // clear, or when typing drops below the minimum length — so a user who types a partial
@@ -673,6 +702,23 @@ async function main() {
       hint.style.opacity = '1';
     }
     state.needsRedraw = true;
+  });
+
+  mapCanvas.addEventListener('click', (event) => {
+    // Mid-gesture there's nothing meaningful to pick, matching onPointerMove's own guard.
+    if (state.interacting || !lastTransform) return;
+    if (state.pickDirty) refreshPicking();
+
+    const rect = mapCanvas.getBoundingClientRect();
+    const id = picking.pick(event.clientX - rect.left, event.clientY - rect.top);
+
+    if (id == null) {
+      // A click on a street or outside the ámbito deselects — mirrors the ✕ button.
+      clearSelection();
+    } else {
+      // Selected in place: you already clicked what's on screen, so the view shouldn't move.
+      pinFeature(id, { fly: false });
+    }
   });
 
   for (const btn of document.querySelectorAll('.segmented button')) {
