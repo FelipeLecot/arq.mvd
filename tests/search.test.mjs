@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPadronIndex, findExact, findPrefix, parseQuery } from '../src/search.js';
+import {
+  buildPadronIndex, findExact, findPrefix, parseQuery,
+  normalizeText, buildAddressIndex, findAddress, detectQueryKind,
+} from '../src/search.js';
 
 test('buildPadronIndex maps each padron to the feature ids that carry it', () => {
   const index = buildPadronIndex([100, 200, 100, 300]);
@@ -66,4 +69,44 @@ test('parseQuery returns null for input with no leading digits', () => {
   assert.equal(parseQuery('abc'), null);
   assert.equal(parseQuery(null), null);
   assert.equal(parseQuery(undefined), null);
+});
+
+test('normalizeText folds case and strips accents', () => {
+  assert.equal(normalizeText('BVAR ÁRTIGAS'), 'bvar artigas');
+  assert.equal(normalizeText('Ejido'), 'ejido');
+});
+
+test('buildAddressIndex skips null addresses and keeps positional ids', () => {
+  const index = buildAddressIndex(['18 DE JULIO 1234', null, 'EJIDO 1500']);
+  assert.deepEqual(index.map((e) => e.id), [0, 2]);
+});
+
+test('findAddress matches a case/accent-insensitive substring', () => {
+  const index = buildAddressIndex(['Bvar Artigas 1200', 'Ejido 1500', '18 de Julio 900']);
+  assert.deepEqual(findAddress(index, 'artigas'), [0]);
+  assert.deepEqual(findAddress(index, 'ÁRTIGAS'), [0]);
+});
+
+test('findAddress returns an empty array for no match or an empty query', () => {
+  const index = buildAddressIndex(['Ejido 1500']);
+  assert.deepEqual(findAddress(index, 'nowhere'), []);
+  assert.deepEqual(findAddress(index, ''), []);
+  assert.deepEqual(findAddress(index, '   '), []);
+});
+
+test('findAddress caps results at the given limit', () => {
+  const index = buildAddressIndex(['Ejido 100', 'Ejido 101', 'Ejido 102', 'Ejido 103']);
+  assert.equal(findAddress(index, 'ejido', 2).length, 2);
+});
+
+test('detectQueryKind reads a bare or sector-suffixed number as padron', () => {
+  assert.equal(detectQueryKind('432381'), 'padron');
+  assert.equal(detectQueryKind(' 432381 A '), 'padron');
+  assert.equal(detectQueryKind('432381A'), 'padron');
+});
+
+test('detectQueryKind reads anything else as address', () => {
+  assert.equal(detectQueryKind('18 de Julio 1234'), 'address');
+  assert.equal(detectQueryKind('Ejido'), 'address');
+  assert.equal(detectQueryKind(''), 'address');
 });
