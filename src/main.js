@@ -448,11 +448,14 @@ async function main() {
   const zoomBehavior = d3zoom()
     .scaleExtent([0.6, 60])
     .filter((event) => {
-      // Scroll/pinch-to-zoom and touch/pen panning are unaffected — this only restricts
-      // mouse-driven drag-panning to the middle button, freeing the left button for
-      // click-to-select (see the click listener below).
-      if (event.type === 'wheel') return true;
-      if (event.pointerType && event.pointerType !== 'mouse') return true;
+      // Scroll/pinch-to-zoom (wheel) and touch/pen panning (touchstart) are unaffected —
+      // d3-zoom only ever calls this filter for 'wheel', 'mousedown', 'dblclick', and
+      // 'touchstart' event types (checked against the installed d3-zoom v3 source), so
+      // gating on event.type here is exhaustive and doesn't depend on PointerEvent-only
+      // properties like pointerType, which a real TouchEvent never has.
+      if (event.type === 'wheel' || event.type === 'touchstart') return true;
+      // Mouse-driven drag-panning (mousedown) and double-click-zoom (dblclick) are
+      // restricted to the middle button, freeing the left button for click-to-select.
       return event.button === 1;
     })
     .on('start', () => {
@@ -707,6 +710,15 @@ async function main() {
   mapCanvas.addEventListener('click', (event) => {
     // Mid-gesture there's nothing meaningful to pick, matching onPointerMove's own guard.
     if (state.interacting || !lastTransform) return;
+
+    // At block LOD, picking returns block-space ids, not parcel-space ones — and blocks
+    // aren't a selectable/pinnable entity anywhere else in the app (no "pinned block"
+    // concept; block hover only shows transient info via titleBlock.showBlock). Treat a
+    // click here as a no-op for selection state rather than corrupting
+    // state.searchSelectedId with a block id that drawParcels/onPointerMove/pointerleave
+    // all assume is parcel-space.
+    if (lastLod === 'block') return;
+
     if (state.pickDirty) refreshPicking();
 
     const rect = mapCanvas.getBoundingClientRect();
