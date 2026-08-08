@@ -99,6 +99,7 @@ const state = {
   hoveredId: null,
   hoveredLod: null,
   selected: null,
+  showUntracked: false,
   // Set by a successful padrón search, independent of attribute-switching's `selected` —
   // applyAttribute()/hist-clear must never reset this. It's the panel's default content;
   // hover temporarily overrides the display but doesn't clear the pin (see onPointerMove).
@@ -171,16 +172,19 @@ function applyAttribute() {
   // Legend and histogram deliberately stay parcel-level regardless of the active LOD —
   // they describe "the dataset," and switching their source per zoom would make the same
   // colour mean a different statistic depending on how far zoomed out you are.
+  document.getElementById('untracked-toggle-wrap').hidden = state.attr !== 'grado';
+
+  const legendVals = legendValues();
   renderLegend(
     document.getElementById('legend-title'),
     document.getElementById('legend-items'),
     state.attr,
-    values,
+    legendVals,
   );
 
   document.getElementById('hist-title').textContent = spec.legendTitle;
   document.getElementById('hist-note').textContent = spec.note;
-  histogram.render(buildBins(state.attr, values));
+  histogram.render(buildBins(state.attr, legendVals));
 
   state.selected = null;
   document.getElementById('hist-clear').hidden = true;
@@ -197,6 +201,21 @@ function blockValuesFor(attr) {
   if (attr === 'grado') return atlas.blockAttrs.grado;
   if (attr === 'altura') return atlas.blockAttrs.altura;
   return atlas.blockAttrs.permits;
+}
+
+/**
+ * Values feeding the legend/histogram summary widgets — unlike valuesFor(), this drops
+ * the NA category by default (per the toggle) since it dwarfs the graded categories:
+ * ~198K NA vs. a few thousand graded parcels makes the bar chart unreadable and the
+ * legend counts uninformative. Map rendering itself is untouched — colors always come
+ * from the unfiltered valuesFor().
+ */
+function legendValues() {
+  const values = valuesFor(state.attr);
+  if (state.attr === 'grado' && !state.showUntracked) {
+    return values.filter((v) => v !== 'NA');
+  }
+  return values;
 }
 
 function redraw() {
@@ -730,8 +749,13 @@ async function main() {
     state.needsRedraw = true;
   });
 
+  document.getElementById('untracked-toggle').addEventListener('change', (e) => {
+    state.showUntracked = e.target.checked;
+    applyAttribute();
+  });
+
   document.getElementById('hist-clear').addEventListener('click', () => {
-    histogram.render(buildBins(state.attr, valuesFor(state.attr)));
+    histogram.render(buildBins(state.attr, legendValues()));
     state.selected = null;
     document.getElementById('hist-clear').hidden = true;
     state.needsRedraw = true;
@@ -739,7 +763,7 @@ async function main() {
 
   window.addEventListener('resize', () => {
     sizeCanvases();
-    histogram.render(buildBins(state.attr, valuesFor(state.attr)));
+    histogram.render(buildBins(state.attr, legendValues()));
   });
 
   window.__atlas = {
