@@ -11,7 +11,10 @@ import { ATTRIBUTES } from './scales.js';
 import { renderLegend } from './legend.js';
 import { createHistogram, buildBins } from './histogram.js';
 import { createTitleBlock } from './hover.js';
-import { buildPadronIndex, findExact, findPrefix, parseQuery } from './search.js';
+import {
+  buildPadronIndex, findExact, findPrefix, parseQuery,
+  buildAddressIndex, findAddress, detectQueryKind,
+} from './search.js';
 
 // A little more than the largest legal envelope in the dataset — the query only needs to
 // not under-include; the precise per-item featureBounds check downstream is the real filter.
@@ -132,6 +135,7 @@ let heights;
 let histogram;
 let dpr = 1;
 let padronIndex;
+let addressIndex;
 let blockItems;
 let blockIndex;
 let blockIdColors;
@@ -394,6 +398,7 @@ async function main() {
 
   items = prepareFeatures(atlas.parcels);
   padronIndex = buildPadronIndex(atlas.attrs.padron);
+  addressIndex = buildAddressIndex(atlas.attrs.address);
   lines = prepareLines(atlas.vias);
   ambitoItems = prepareFeatures(atlas.ambito.features);
   parcelIndex = buildIndex(items);
@@ -568,28 +573,58 @@ async function main() {
   }
 
   searchInput.addEventListener('input', () => {
-    // Same leading-digit-run rule as parseQuery (used on submit), so a query that shows
-    // suggestions here is guaranteed not to be rejected as invalid on Enter.
-    const padron = parseQuery(searchInput.value);
-    const digits = padron == null ? '' : String(padron);
-    if (digits.length < 2) {
+    const raw = searchInput.value;
+    if (detectQueryKind(raw) === 'padron') {
+      // Same leading-digit-run rule as parseQuery (used on submit), so a query that shows
+      // suggestions here is guaranteed not to be rejected as invalid on Enter.
+      const padron = parseQuery(raw);
+      const digits = padron == null ? '' : String(padron);
+      if (digits.length < 2) {
+        hideSearchFeedback();
+        return;
+      }
+      renderSuggestions(findPrefix(padronIndex, digits, 8));
+      return;
+    }
+
+    const q = raw.trim();
+    if (q.length < 3) {
       hideSearchFeedback();
       return;
     }
-    renderSuggestions(findPrefix(padronIndex, digits, 8));
+    renderDisambiguation(findAddress(addressIndex, q, 8));
   });
 
   searchForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    const padron = parseQuery(searchInput.value);
-    if (padron == null) {
+    const raw = searchInput.value;
+
+    if (detectQueryKind(raw) === 'padron') {
+      const padron = parseQuery(raw);
+      if (padron == null) {
+        searchResults.hidden = true;
+        searchResults.innerHTML = '';
+        searchStatus.hidden = false;
+        searchStatus.textContent = 'Ingresá un número de padrón';
+        return;
+      }
+      runSearch(padron);
+      return;
+    }
+
+    const ids = findAddress(addressIndex, raw, 8);
+    if (ids.length === 0) {
       searchResults.hidden = true;
       searchResults.innerHTML = '';
       searchStatus.hidden = false;
-      searchStatus.textContent = 'Ingresá un número de padrón';
+      searchStatus.textContent = 'Sin resultados';
       return;
     }
-    runSearch(padron);
+    if (ids.length === 1) {
+      selectSearchResult(ids[0]);
+      return;
+    }
+    renderDisambiguation(ids);
   });
 
   searchClear.addEventListener('click', () => {
