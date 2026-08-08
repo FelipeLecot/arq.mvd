@@ -8,37 +8,81 @@
  * extruded building would be wrong by the height of the building.
  */
 
-// Packed ids are spaced apart by this factor rather than assigned consecutive integers.
-// Canvas antialiases every path edge, and a fill/stroke pair drawn over an already-opaque
-// neighbour blends the two RGB colours at whatever fractional coverage the rasterizer
-// computed — round(idA*coverage + idB*(1-coverage)) is, in general, some THIRD integer.
-// With ids packed as consecutive integers (spacing 1), every integer in range belongs to
-// some real feature, so that blended integer is *always* another real, arbitrary id — every
-// antialiased edge pixel decodes to a parcel unrelated to either of its true neighbours,
-// silently. Spacing ids apart means only 1 in SPACING possible rounded outcomes lands back
-// on a real id; the other (SPACING-1)/SPACING blends round to a value nobody owns, which
-// colorToId now reports as invalid rather than as a fabricated pick. See pick() for how
-// that plays into rejecting contaminated pixels. 32 keeps the packed value comfortably
-// inside 24 bits (16,777,215) up to roughly 500k features — the citywide dataset is ~209k.
-const ID_SPACING = 32;
+const CHANNEL_BITS = 24; // 3 x 8-bit RGB channels
+const SPACE = 1 << CHANNEL_BITS; // 16,777,216 packed values, 0 reserved for background
+
+/**
+ * Ids are NOT packed as consecutive integers (`id + 1`). Canvas antialiases every path
+ * edge, and a fill/stroke pair drawn over an already-opaque neighbour blends the two RGB
+ * colours at whatever fractional coverage the rasterizer computed —
+ * round(colourA*coverage + colourB*(1-coverage)) is, in general, some THIRD packed value.
+ * With consecutive packing every value in range belongs to some real feature, so that
+ * blended value was *always* another real, arbitrary id: every antialiased edge pixel
+ * decoded to a parcel unrelated to either true neighbour, silently, 100% of the time a
+ * blend occurred (and at city zoom ~44% of foreground pixels are blends).
+ *
+ * An earlier version of this fix multiplied the packed value by a constant spacing factor
+ * and rejected non-multiples. That doesn't work: `r<<16` and `g<<8` are themselves
+ * multiples of 256, and 256 is a multiple of any modest spacing factor, so "is this a
+ * multiple of SPACING" collapses to a check on the low byte alone — worth far less than
+ * the spacing implied (measured 9.9% of blended picks still wrong, not ~3%), because
+ * antialiasing blends each RGB channel independently and two channels' worth of garbage
+ * passed straight through unexamined.
+ *
+ * PACK_MULT below is an odd 24-bit constant, so multiplying by it mod 2^24 is a bijection
+ * (gcd(odd, 2^24) = 1) that scrambles an id's bits across R, G and B roughly uniformly —
+ * there is no single cheap channel or bitmask a blend can coincidentally satisfy. But a
+ * scrambled *arithmetic* code alone still only pushes the collision odds down to "how many
+ * real ids exist, out of how many packed values" — measurably better (dropped the
+ * adversarial 20x20-shuffled-grid failure rate in tests/picking.test.mjs from ~36% of
+ * blended picks pre-fix to a small handful of real collisions per run — down from 9.9%
+ * under an earlier, flawed version of this spacing idea that turned out to only examine
+ * one colour channel, see below) but not zero, and not verifiable from the arithmetic
+ * alone. So `PickingLayer` also tracks the *exact* set of ids actually painted into the
+ * buffer this frame (`setPaintedIds`, called from src/main.js's refreshPicking right after
+ * drawPicking) and `pick()` requires both that membership *and* a local plurality vote
+ * (see its own docstring) before trusting a colour — together, verified at 0 violations
+ * across 9 adversarial shuffles/densities (see task-3-report.md).
+ */
+const PACK_MULT = 0x9e3779b1 & (SPACE - 1); // Knuth's multiplicative hash constant, masked to 24 bits (still odd)
+
+function packId(id) {
+  // +1 so id 0 never packs to 0, which is the "nothing here" background sentinel.
+  return ((id + 1) * PACK_MULT) % SPACE;
+}
+
+// Modular inverse of PACK_MULT mod SPACE (extended Euclidean algorithm; SPACE is a power
+// of two so this always terminates in a handful of steps). Lets colorToId() do a pure,
+// context-free decode — used by tests and diagnostics; PickingLayer.pick() itself relies
+// on the stronger per-frame membership check above, not on this alone.
+function modInverse(a, m) {
+  let [oldR, r] = [a, m];
+  let [oldS, s] = [1, 0];
+  while (r !== 0) {
+    const q = Math.floor(oldR / r);
+    [oldR, r] = [r, oldR - q * r];
+    [oldS, s] = [s, oldS - q * s];
+  }
+  return ((oldS % m) + m) % m;
+}
+const PACK_MULT_INV = modInverse(PACK_MULT, SPACE);
 
 export function idToColor(id) {
-  // +1 so id 0 is not black, which is the "nothing here" background.
-  const n = (id + 1) * ID_SPACING;
+  const n = packId(id);
   return `rgb(${(n >> 16) & 0xff},${(n >> 8) & 0xff},${n & 0xff})`;
 }
 
 /**
- * Decode a packed colour back to a feature id, or null if it isn't a genuine one.
- *
- * Only exact multiples of ID_SPACING were ever assigned to a real feature — anything else
- * is background (n === 0) or the product of antialiasing blending two real ids together
- * (see ID_SPACING above). Both cases mean "nothing trustworthy was read here", so both
- * return null; the caller decides whether to treat that as "nothing" or search nearby.
+ * Pure decode of a packed colour back to a feature id, or null for the background
+ * sentinel (0). Context-free: unlike PickingLayer.pick(), this has no notion of which ids
+ * are actually on screen this frame, so a value that arose from blending two real colours
+ * together will still decode to *some* id here — this is a diagnostic/test utility, not
+ * the thing that makes hit-testing correct. See PICK_MULT's docstring above.
  */
 export function colorToId(r, g, b) {
   const n = (r << 16) | (g << 8) | b;
-  return n === 0 || n % ID_SPACING !== 0 ? null : n / ID_SPACING - 1;
+  if (n === 0) return null;
+  return ((n * PACK_MULT_INV) % SPACE) - 1;
 }
 
 export class PickingLayer {
@@ -61,22 +105,43 @@ export class PickingLayer {
   }
 
   /**
+   * Record exactly which ids were painted into the buffer this frame (src/main.js's
+   * `order` — the same array passed to drawPicking), so pick() can validate a decoded
+   * colour against reality instead of trusting arithmetic alone. See PACK_MULT's docstring
+   * at the top of this file for why arithmetic alone isn't enough.
+   */
+  setPaintedIds(ids) {
+    const byColor = new Map();
+    for (const id of ids) byColor.set(packId(id), id);
+    this.paintedColorToId = byColor;
+  }
+
+  /**
    * Read the feature id under a CSS-pixel coordinate, or null.
    *
-   * Canvas antialiases every polygon edge, and (before ID_SPACING, see picking.js's top)
-   * an id colour was a bit-packed integer with no gaps, so a blended boundary pixel always
-   * decoded to a THIRD parcel unrelated to either neighbour. At city zoom roughly 44% of
-   * foreground pixels are such blends.
+   * Canvas antialiases every polygon edge, so a boundary pixel's colour is a blend of
+   * whatever was drawn there — at city zoom roughly 44% of foreground pixels are such
+   * blends. Two independent defences, not one:
    *
-   * Two independent defences, not one: `decode()` throws out any pixel whose colour isn't
-   * an exact multiple of ID_SPACING — most blends land off-grid and are caught here, cheaply,
-   * before locality even comes into it. What's left is a *rare* blend that still happens to
-   * land back on some other real id's exact colour. For that residual case a blend is
-   * usually a thin antialiased band (a stroke's own ~1.5px-wide edge, or a fill boundary),
-   * not a wide one — a real parcel's *interior*, away from any edge, has its colour
-   * repeated all through the neighbourhood, so the centre is trusted only when its colour
-   * repeats nearby, and otherwise the nearest colour that does repeat within a 3×3 radius
-   * (squared distance ≤ 2) is accepted; beyond that, deselect rather than guess.
+   * 1. `this.paintedColorToId` (see setPaintedIds) only recognises the *exact* colours of
+   *    ids actually drawn this frame — see PACK_MULT's docstring for why a blend needs a
+   *    real coincidence, not just an off-grid arithmetic slip, to pass this.
+   * 2. Even a colour that does pass #1 might be a genuine blend that happens to reproduce
+   *    another real, currently-visible id's exact colour — rare, but with hundreds of ids
+   *    painted in one frame, "rare" still shows up in practice: the adversarial 20x20
+   *    dense-grid test in tests/picking.test.mjs hit several such collisions per run before
+   *    this second defence existed (traced one by hand — a solid 1x3-pixel block, 60+px
+   *    from the id it decoded to, on a shared edge between two *different* real ids).
+   *    That kind of collision is a thin antialiased band at best (a stroke's own ~1.5px
+   *    edge, or a fill boundary) — a real parcel's *interior*, away from any edge, dominates
+   *    its own neighbourhood far more than any accidental blend can. So this doesn't just
+   *    check "does this colour repeat at least twice nearby" (that's satisfiable by a
+   *    1-3px accidental band) — it takes the colour with the MOST repeats within a
+   *    3×3-ish neighbourhood (squared distance ≤ 2, ties broken by distance), which a
+   *    coincidental collision essentially never wins against the true owner's much larger
+   *    real interior. Verified empirically: 0 violations across a full-canvas sweep of
+   *    that adversarial grid, repeated over 9 different shuffles/densities (see the test
+   *    and task-3-report.md).
    */
   pick(x, y) {
     const cx = Math.floor(x);
@@ -97,45 +162,48 @@ export class PickingLayer {
       const i = (iy * w + ix) * 4;
       return (data[i] << 16) | (data[i + 1] << 8) | data[i + 2];
     };
-    // Background (0) or off-grid (not a multiple of ID_SPACING) both mean "not a real,
-    // uncontaminated id colour" — see ID_SPACING's docstring. Neither is ever a candidate
-    // answer, and neither counts toward another colour's "repeats nearby" tally.
-    const isRealId = (c) => c !== 0 && c % ID_SPACING === 0;
+    const painted = this.paintedColorToId;
+    // Background (0) or a colour nobody was assigned this frame both mean "not a real,
+    // uncontaminated id here" — see setPaintedIds. Neither is ever a candidate answer, and
+    // neither counts toward another colour's tally.
+    const isReal = (c) => c !== 0 && painted != null && painted.has(c);
+
+    // Genuine background — a street or the edge of the ámbito — selects nothing.
+    if (at(cx - x0, cy - y0) === 0) return null;
 
     const counts = new Map();
     for (let iy = 0; iy < h; iy++) {
       for (let ix = 0; ix < w; ix++) {
         const c = at(ix, iy);
-        if (isRealId(c)) counts.set(c, (counts.get(c) ?? 0) + 1);
+        if (isReal(c)) counts.set(c, (counts.get(c) ?? 0) + 1);
       }
     }
 
-    const centre = at(cx - x0, cy - y0);
-    // Genuine background — a street or the edge of the ámbito — selects nothing.
-    if (centre === 0) return null;
-    if (isRealId(centre) && (counts.get(centre) ?? 0) >= 2) {
-      return colorToId(centre >> 16, (centre >> 8) & 0xff, centre & 0xff);
-    }
-
-    // Centre is off-grid or an antialias island — take the nearest colour that is both a
-    // real id and actually solid, but only within a 3×3 neighbourhood (squared distance
-    // ≤ 2) to avoid snapping to unrelated neighbouring parcels.
-    let best = 0;
+    // Plurality vote within a 3×3-ish neighbourhood (squared distance ≤ 2, matching the
+    // old "don't snap to unrelated neighbouring parcels" radius): the colour with the most
+    // repeats wins, ties broken by nearest to the query point. Requiring ≥2 repeats still
+    // rejects one-pixel antialias islands outright, same as before.
+    const ccx = cx - x0;
+    const ccy = cy - y0;
+    let best = null;
+    let bestCount = 0;
     let bestDist = Infinity;
     for (let iy = 0; iy < h; iy++) {
       for (let ix = 0; ix < w; ix++) {
         const c = at(ix, iy);
-        if (!isRealId(c) || (counts.get(c) ?? 0) < 2) continue;
-        const dx = ix - (cx - x0);
-        const dy = iy - (cy - y0);
+        const count = counts.get(c) ?? 0;
+        if (!isReal(c) || count < 2) continue;
+        const dx = ix - ccx;
+        const dy = iy - ccy;
         const d = dx * dx + dy * dy;
-        if (d <= 2 && d < bestDist) {
+        if (d > 2) continue;
+        if (count > bestCount || (count === bestCount && d < bestDist)) {
+          bestCount = count;
           bestDist = d;
           best = c;
         }
       }
     }
-    if (best === 0) return null;
-    return colorToId(best >> 16, (best >> 8) & 0xff, best & 0xff);
+    return best == null ? null : painted.get(best);
   }
 }

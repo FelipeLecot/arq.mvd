@@ -299,6 +299,9 @@ function refreshPicking() {
       width: rect.width,
       height: rect.height,
     });
+    // Tells pick() exactly which ids' colours are genuine this frame — see PACK_MULT's
+    // docstring in picking.js for why arithmetic alone can't carry that guarantee.
+    picking.setPaintedIds(order);
   } else {
     const order = visibleParcelOrder(lastTransform, rect.width, rect.height, lastExtrude, exaggeration);
     drawPicking(picking.ctx, items, lastTransform, {
@@ -310,6 +313,7 @@ function refreshPicking() {
       width: rect.width,
       height: rect.height,
     });
+    picking.setPaintedIds(order);
   }
 
   state.pickDirty = false;
