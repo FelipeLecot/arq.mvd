@@ -12,6 +12,72 @@
 
 import { GRADE_COLORS, GRADE_LABELS, ATTRIBUTES } from './scales.js';
 
+/** One <dl> of label/value rows, skipping null values; null if nothing survives. */
+function buildRows(pairs) {
+  const present = pairs.filter(([, value]) => value != null);
+  if (!present.length) return null;
+  const dl = document.createElement('dl');
+  for (const [label, value] of present) {
+    const row = document.createElement('div');
+    row.className = 'tb-row';
+    const dt = document.createElement('dt');
+    dt.textContent = label;
+    const dd = document.createElement('dd');
+    dd.textContent = value;
+    row.append(dt, dd);
+    dl.appendChild(row);
+  }
+  return dl;
+}
+
+/** A titled group of rows, or null if every field in `pairs` is null for this parcel. */
+function buildGroup(title, pairs) {
+  const dl = buildRows(pairs);
+  if (!dl) return null;
+  const group = document.createElement('div');
+  group.className = 'tb-extra-group';
+  const h3 = document.createElement('h3');
+  h3.textContent = title;
+  group.append(h3, dl);
+  return group;
+}
+
+/** "G0"..."G4" for a valid grade index, otherwise the raw number as a fallback. */
+function gradeCode(n) {
+  const code = `G${n}`;
+  return GRADE_LABELS[code] ? code : String(n);
+}
+
+/**
+ * Ciudad Vieja's own building name + grade-history line (1983 → 2000 → 2010), reusing the
+ * shared grade-code vocabulary rather than showing raw integers. -1 in the 1983/2000
+ * snapshots means "not classified that year" (docs/superpowers/specs/
+ * 2026-08-07-heritage-data-expansion-design.md §3) and is treated the same as null.
+ */
+function buildCvGroup(id, attrs) {
+  const nameAct = attrs.cvBuildingName[id];
+  const nameOri = attrs.cvBuildingNameOrig[id];
+  const isCv = attrs.gradoSource[id] === 'ciudad-vieja';
+  if (nameAct == null && nameOri == null && !isCv) return null;
+
+  const pairs = [];
+  if (nameAct != null && nameOri != null && nameAct !== nameOri) {
+    pairs.push(['Nombre actual', nameAct], ['Nombre original', nameOri]);
+  } else if (nameAct != null || nameOri != null) {
+    pairs.push(['Nombre del edificio', nameAct ?? nameOri]);
+  }
+
+  const history = [];
+  const g1983 = attrs.cvGrado1983[id];
+  const g2000 = attrs.cvGrado2000[id];
+  if (g1983 != null && g1983 >= 0) history.push(`1983 ${gradeCode(g1983)}`);
+  if (g2000 != null && g2000 >= 0) history.push(`2000 ${gradeCode(g2000)}`);
+  if (isCv) history.push(`2010 ${attrs.grado[id]} (actual)`);
+  if (history.length) pairs.push(['Grado histórico', history.join(' · ')]);
+
+  return buildGroup('Ciudad Vieja — relevamiento', pairs);
+}
+
 export function createTitleBlock(root) {
   const el = {
     root,
@@ -24,6 +90,7 @@ export function createTitleBlock(root) {
     permits: root.querySelector('#tb-permits'),
     grado: root.querySelector('#tb-grado'),
     detail: root.querySelector('#tb-detail'),
+    extra: root.querySelector('#tb-extra'),
   };
 
   function hide() {
@@ -55,6 +122,22 @@ export function createTitleBlock(root) {
     el.grado.textContent = GRADE_LABELS[grade] ?? grade;
     el.detail.textContent = attrs.gradoDetail[id] ?? '';
 
+    const groups = [];
+    const heritageGroup = buildGroup('Declaratoria patrimonial', [
+      ['Nombre', attrs.heritageName[id]],
+      ['Arquitecto', attrs.architect[id]],
+      ['Año', attrs.builtDate[id]],
+      ['Declaratoria', attrs.heritageDeclaration[id]],
+      ['Tipo de protección', attrs.protectionType[id]],
+      ['Decreto', attrs.decreto[id]],
+    ]);
+    if (heritageGroup) groups.push(heritageGroup);
+
+    const cvGroup = buildCvGroup(id, attrs);
+    if (cvGroup) groups.push(cvGroup);
+
+    el.extra.replaceChildren(...groups);
+
     root.hidden = false;
   }
 
@@ -79,6 +162,7 @@ export function createTitleBlock(root) {
 
     el.grado.textContent = 'Vista de manzana — acercate para ver cada padrón';
     el.detail.textContent = '';
+    el.extra.replaceChildren();
 
     root.hidden = false;
   }
