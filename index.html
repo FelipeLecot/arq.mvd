@@ -25,9 +25,9 @@
       <span>Volumen</span>
     </label>
     <form class="search" id="padron-search-form" role="search">
-      <label class="search__label" for="padron-input">Padrón</label>
+      <label class="search__label" for="padron-input">Padrón o dirección</label>
       <div class="search__field">
-        <input type="text" id="padron-input" inputmode="numeric" autocomplete="off" placeholder="N.º de padrón">
+        <input type="text" id="padron-input" autocomplete="off" placeholder="N.º de padrón o dirección">
         <button type="button" id="padron-clear" class="search__clear" hidden aria-label="Quitar selección">✕</button>
       </div>
       <ul class="search__results" id="padron-results" hidden></ul>
@@ -63,12 +63,19 @@
       </div>
     </dl>
     <p class="titleblock__detail" id="tb-detail"></p>
+    <div class="tb-extra" id="tb-extra"></div>
   </aside>
 </main>
 
 <footer class="rail rail--bottom">
   <section class="legend" aria-label="Referencias">
-    <h2 id="legend-title">Protección</h2>
+    <div class="legend__head">
+      <h2 id="legend-title">Protección</h2>
+      <label class="toggle" id="untracked-toggle-wrap" hidden>
+        <input type="checkbox" id="untracked-toggle">
+        <span>Incluir fuera de inventario</span>
+      </label>
+    </div>
     <ul id="legend-items"></ul>
   </section>
 
@@ -79,11 +86,6 @@
     </div>
     <svg id="hist" role="img" aria-label="Distribución del atributo activo"></svg>
     <p class="histogram__note" id="hist-note"></p>
-  </section>
-
-  <section class="provenance">
-    <h2>Alcance</h2>
-    <p id="coverage">Cargando…</p>
   </section>
 </footer>
 

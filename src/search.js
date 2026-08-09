@@ -57,3 +57,56 @@ export function parseQuery(raw) {
   const digits = String(raw).trim().match(/^\d+/);
   return digits ? Number(digits[0]) : null;
 }
+
+/**
+ * Fold a string to lowercase with diacritics stripped, so an address search matches
+ * regardless of accents or case ("Bvar Artigas" / "bvar artigas" / "BVAR ÁRTIGAS").
+ */
+export function normalizeText(s) {
+  return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+/**
+ * Build a flat `{ id, normalized }[]` over every non-null address, parallel to
+ * `atlas.attrs.address`. A flat array, not a Map, since addresses aren't unique keys the
+ * way padrón numbers mostly are (several parcels can share a street + door number).
+ */
+export function buildAddressIndex(addressArr) {
+  const entries = [];
+  for (let id = 0; id < addressArr.length; id++) {
+    const address = addressArr[id];
+    if (address == null) continue;
+    entries.push({ id, normalized: normalizeText(address) });
+  }
+  return entries;
+}
+
+/**
+ * Feature ids whose address contains `rawQuery` as a substring, case/accent-insensitive.
+ * Same capped-linear-scan style as findPrefix: simple, and the cap keeps a short, common
+ * fragment from building a huge result set on every keystroke.
+ */
+export function findAddress(index, rawQuery, limit = 8) {
+  const q = normalizeText(String(rawQuery).trim());
+  const results = [];
+  if (!q) return results;
+  for (const entry of index) {
+    if (entry.normalized.includes(q)) {
+      results.push(entry.id);
+      if (results.length >= limit) break;
+    }
+  }
+  return results;
+}
+
+/**
+ * Which search a raw input should run: 'padron' for anything parseQuery would already
+ * accept (a bare number, optionally with a trailing sector letter — "432381", "432381 A"),
+ * 'address' for everything else. A query that starts with digits but isn't purely
+ * digits-plus-sector-letter (e.g. "18 de Julio 1234") must resolve to 'address', not be
+ * misread as padrón 18.
+ */
+export function detectQueryKind(raw) {
+  const trimmed = String(raw ?? '').trim();
+  return /^\d+\s*[A-Za-z]?$/.test(trimmed) ? 'padron' : 'address';
+}

@@ -41,14 +41,16 @@ test('the 92 Centro "Altura especial" parcels are null, not 0', { skip }, () => 
 
 test('grade distribution: Centro grades untouched by pass 1, Ciudad Vieja grades merged in by pass 2', { skip }, () => {
   const { meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
-  // Measured on the 2026-08-07 build (post Task 4-7). RG is Centro-only and unchanged from
-  // the pre-expansion figure (3875) since pass 1 doesn't consult the Ciudad Vieja map; every
-  // other grade grew by however many of the 1835 Ciudad Vieja heritage records matched a
-  // citywide padron (1743 did — see the gradoSource test below) and NA shrank by that same
-  // 1743.
+  // Re-measured 2026-08-08 against a fresh fetch (previously 2026-08-07: G1 was 2351). RG is
+  // Centro-only and unchanged from the pre-expansion figure (3875) since pass 1 doesn't
+  // consult the Ciudad Vieja map; every other grade grew by however many Ciudad Vieja
+  // heritage records matched a citywide padron and NA shrank by that same count. The exact
+  // grade counts drift build to build as IM's live open-data source itself changes — this
+  // isn't expected to stay bit-for-bit stable indefinitely; re-measure and update here (and
+  // the sibling blocks-count assertion below) when it drifts again, same as this update did.
   assert.equal(meta.gradeCounts.RG, 3875);
   assert.equal(meta.gradeCounts.G0, 537);
-  assert.equal(meta.gradeCounts.G1, 2351);
+  assert.equal(meta.gradeCounts.G1, 2349);
   assert.equal(meta.gradeCounts.G2, 2981);
   assert.equal(meta.gradeCounts.G3, 852);
   assert.equal(meta.gradeCounts.G4, 102);
@@ -90,10 +92,12 @@ test('geometry is projected into Web Mercator and spans the full city, not just 
 
 test('blocks: touching parcels merge into far fewer city-block shapes', { skip }, () => {
   const { meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
-  // Measured on the 2026-08-02 build; a large deviation means the adjacency tolerance or
-  // the underlying parcel geometry changed. Unchanged by the switch to merging quantized
-  // geometry — the ~0.44 m grid is fine enough not to regroup anything at a 0.5 m tolerance.
-  assert.equal(meta.counts.blocks, 8360);
+  // Re-measured 2026-08-08 against a fresh fetch (previously 2026-08-02: 8360). A *large*
+  // deviation would mean the adjacency tolerance or the underlying parcel geometry changed;
+  // this project's live upstream parcel data drifts by a handful of blocks between fetches
+  // on its own, so a small exact-count change here is expected maintenance, not a regression
+  // — see the sibling grade-distribution test above for the same caveat.
+  assert.equal(meta.counts.blocks, 8369);
   // Sanity bound rather than an exact figure, so minor upstream data wobble doesn't break
   // this test the way an exact-equality assertion would.
   assert.ok(

@@ -11,7 +11,10 @@ import { ATTRIBUTES } from './scales.js';
 import { renderLegend } from './legend.js';
 import { createHistogram, buildBins } from './histogram.js';
 import { createTitleBlock } from './hover.js';
-import { buildPadronIndex, findExact, findPrefix, parseQuery } from './search.js';
+import {
+  buildPadronIndex, findExact, findPrefix, parseQuery,
+  buildAddressIndex, findAddress, detectQueryKind,
+} from './search.js';
 
 // A little more than the largest legal envelope in the dataset — the query only needs to
 // not under-include; the precise per-item featureBounds check downstream is the real filter.
@@ -96,6 +99,7 @@ const state = {
   hoveredId: null,
   hoveredLod: null,
   selected: null,
+  showUntracked: false,
   // Set by a successful padrón search, independent of attribute-switching's `selected` —
   // applyAttribute()/hist-clear must never reset this. It's the panel's default content;
   // hover temporarily overrides the display but doesn't clear the pin (see onPointerMove).
@@ -117,8 +121,6 @@ const searchClear = document.getElementById('padron-clear');
 const searchResults = document.getElementById('padron-results');
 const searchStatus = document.getElementById('padron-status');
 
-const fmt = new Intl.NumberFormat('es-UY');
-
 let atlas;
 let items;
 let lines;
@@ -132,6 +134,7 @@ let heights;
 let histogram;
 let dpr = 1;
 let padronIndex;
+let addressIndex;
 let blockItems;
 let blockIndex;
 let blockIdColors;
@@ -169,16 +172,19 @@ function applyAttribute() {
   // Legend and histogram deliberately stay parcel-level regardless of the active LOD —
   // they describe "the dataset," and switching their source per zoom would make the same
   // colour mean a different statistic depending on how far zoomed out you are.
+  document.getElementById('untracked-toggle-wrap').hidden = state.attr !== 'grado';
+
+  const legendVals = legendValues();
   renderLegend(
     document.getElementById('legend-title'),
     document.getElementById('legend-items'),
     state.attr,
-    values,
+    legendVals,
   );
 
   document.getElementById('hist-title').textContent = spec.legendTitle;
   document.getElementById('hist-note').textContent = spec.note;
-  histogram.render(buildBins(state.attr, values));
+  histogram.render(buildBins(state.attr, legendVals));
 
   state.selected = null;
   document.getElementById('hist-clear').hidden = true;
@@ -195,6 +201,21 @@ function blockValuesFor(attr) {
   if (attr === 'grado') return atlas.blockAttrs.grado;
   if (attr === 'altura') return atlas.blockAttrs.altura;
   return atlas.blockAttrs.permits;
+}
+
+/**
+ * Values feeding the legend/histogram summary widgets — unlike valuesFor(), this drops
+ * the NA category by default (per the toggle) since it dwarfs the graded categories:
+ * ~198K NA vs. a few thousand graded parcels makes the bar chart unreadable and the
+ * legend counts uninformative. Map rendering itself is untouched — colors always come
+ * from the unfiltered valuesFor().
+ */
+function legendValues() {
+  const values = valuesFor(state.attr);
+  if (state.attr === 'grado' && !state.showUntracked) {
+    return values.filter((v) => v !== 'NA');
+  }
+  return values;
 }
 
 function redraw() {
@@ -295,6 +316,9 @@ function refreshPicking() {
       width: rect.width,
       height: rect.height,
     });
+    // Tells pick() exactly which ids' colours are genuine this frame — see PACK_MULT's
+    // docstring in picking.js for why arithmetic alone can't carry that guarantee.
+    picking.setPaintedIds(order);
   } else {
     const order = visibleParcelOrder(lastTransform, rect.width, rect.height, lastExtrude, exaggeration);
     drawPicking(picking.ctx, items, lastTransform, {
@@ -306,6 +330,7 @@ function refreshPicking() {
       width: rect.width,
       height: rect.height,
     });
+    picking.setPaintedIds(order);
   }
 
   state.pickDirty = false;
@@ -394,6 +419,7 @@ async function main() {
 
   items = prepareFeatures(atlas.parcels);
   padronIndex = buildPadronIndex(atlas.attrs.padron);
+  addressIndex = buildAddressIndex(atlas.attrs.address);
   lines = prepareLines(atlas.vias);
   ambitoItems = prepareFeatures(atlas.ambito.features);
   parcelIndex = buildIndex(items);
@@ -426,18 +452,18 @@ async function main() {
   sizeCanvases();
   applyAttribute();
 
-  // Coverage, stated plainly: two tiers, citywide POT parcels and Centro's heritage subset.
-  const { meta } = atlas;
-  document.getElementById('coverage').innerHTML =
-    `<strong>${fmt.format(meta.counts.parcels)} padrones</strong> de toda la ciudad (POT — Plan de ` +
-    `Ordenamiento Territorial), de los cuales ${fmt.format(meta.coverage.centroParcels)} (Centro) ` +
-    `tienen grado de protección patrimonial real (decreto 39.085, 100% de cobertura allí). Altura ` +
-    `normativa cubre el 100% de la ciudad; obras, el ${meta.coverage.permitPct}%. ` +
-    `${fmt.format(meta.coverage.alturaEspecial)} padrones tienen altura especial, sin valor numérico ` +
-    `(${fmt.format(meta.coverage.centroAlturaEspecial)} de ellos dentro del Centro).`;
-
   const zoomBehavior = d3zoom()
     .scaleExtent([0.6, 60])
+    .filter((event) => {
+      // Scroll/pinch-to-zoom (wheel), touch/pen panning (touchstart), and double-click-zoom
+      // (dblclick) are all unaffected by the middle-button-pan restriction below — d3-zoom
+      // only ever calls this filter for these four event types, checked against the
+      // installed d3-zoom v3 source (node_modules/d3-zoom/src/zoom.js).
+      if (event.type === 'wheel' || event.type === 'touchstart' || event.type === 'dblclick') return true;
+      // Mouse-driven drag-panning (mousedown) is restricted to the middle button, freeing
+      // the left button for click-to-select.
+      return event.button === 1;
+    })
     .on('start', () => {
       state.interacting = true;
     })
@@ -452,6 +478,12 @@ async function main() {
     });
 
   select(mapCanvas).call(zoomBehavior);
+
+  // Windows/Linux browsers otherwise enter native autoscroll mode on a middle-button press
+  // over a non-scrolling element, which fights with d3-zoom's own drag handling.
+  mapCanvas.addEventListener('mousedown', (event) => {
+    if (event.button === 1) event.preventDefault();
+  });
 
   /**
    * Centre and zoom to a feature's Mercator bounds. The `k` floor of 8 keeps the
@@ -501,15 +533,40 @@ async function main() {
     searchStatus.hidden = true;
   }
 
-  /** Pin a feature as the search result: default panel content, flies the map to it. */
-  function selectSearchResult(id) {
+  /**
+   * Pin a feature as the search result / map selection: default panel content that
+   * persists through hover (see onPointerMove's fallback), however it was selected. Syncs
+   * the padrón input so there's one consistent way to see/clear whatever is pinned.
+   */
+  function pinFeature(id, { fly }) {
     state.searchSelectedId = id;
     titleBlock.show(id, atlas.attrs);
     hint.style.opacity = '0';
-    flyTo(id);
-    state.needsRedraw = true;
-    hideSearchFeedback();
+    const sector = atlas.attrs.sector[id];
+    const padron = atlas.attrs.padron[id];
+    searchInput.value = sector ? `${padron} ${sector}` : String(padron);
     searchClear.hidden = false;
+    hideSearchFeedback();
+    if (fly) flyTo(id);
+    state.needsRedraw = true;
+  }
+
+  /** Clear the current pin, whether it came from search or a map click. */
+  function clearSelection() {
+    state.searchSelectedId = null;
+    searchInput.value = '';
+    searchClear.hidden = true;
+    hideSearchFeedback();
+    if (state.hoveredId == null) {
+      titleBlock.hide();
+      hint.style.opacity = '1';
+    }
+    state.needsRedraw = true;
+  }
+
+  /** A search result always flies the map to frame it. */
+  function selectSearchResult(id) {
+    pinFeature(id, { fly: true });
   }
 
   /** Disambiguation list for a padrón with sector-variant duplicates — one row per id. */
@@ -568,41 +625,61 @@ async function main() {
   }
 
   searchInput.addEventListener('input', () => {
-    // Same leading-digit-run rule as parseQuery (used on submit), so a query that shows
-    // suggestions here is guaranteed not to be rejected as invalid on Enter.
-    const padron = parseQuery(searchInput.value);
-    const digits = padron == null ? '' : String(padron);
-    if (digits.length < 2) {
+    const raw = searchInput.value;
+    if (detectQueryKind(raw) === 'padron') {
+      // Same leading-digit-run rule as parseQuery (used on submit), so a query that shows
+      // suggestions here is guaranteed not to be rejected as invalid on Enter.
+      const padron = parseQuery(raw);
+      const digits = padron == null ? '' : String(padron);
+      if (digits.length < 2) {
+        hideSearchFeedback();
+        return;
+      }
+      renderSuggestions(findPrefix(padronIndex, digits, 8));
+      return;
+    }
+
+    const q = raw.trim();
+    if (q.length < 3) {
       hideSearchFeedback();
       return;
     }
-    renderSuggestions(findPrefix(padronIndex, digits, 8));
+    renderDisambiguation(findAddress(addressIndex, q, 8));
   });
 
   searchForm.addEventListener('submit', (e) => {
     e.preventDefault();
-    const padron = parseQuery(searchInput.value);
-    if (padron == null) {
+    const raw = searchInput.value;
+
+    if (detectQueryKind(raw) === 'padron') {
+      const padron = parseQuery(raw);
+      if (padron == null) {
+        searchResults.hidden = true;
+        searchResults.innerHTML = '';
+        searchStatus.hidden = false;
+        searchStatus.textContent = 'Ingresá un número de padrón';
+        return;
+      }
+      runSearch(padron);
+      return;
+    }
+
+    const ids = findAddress(addressIndex, raw, 8);
+    if (ids.length === 0) {
       searchResults.hidden = true;
       searchResults.innerHTML = '';
       searchStatus.hidden = false;
-      searchStatus.textContent = 'Ingresá un número de padrón';
+      searchStatus.textContent = 'Sin resultados';
       return;
     }
-    runSearch(padron);
+    if (ids.length === 1) {
+      selectSearchResult(ids[0]);
+      return;
+    }
+    renderDisambiguation(ids);
   });
 
-  searchClear.addEventListener('click', () => {
-    state.searchSelectedId = null;
-    searchInput.value = '';
-    searchClear.hidden = true;
-    hideSearchFeedback();
-    if (state.hoveredId == null) {
-      titleBlock.hide();
-      hint.style.opacity = '1';
-    }
-    state.needsRedraw = true;
-  });
+  searchClear.addEventListener('click', clearSelection);
 
   // The suggestions/disambiguation dropdown otherwise only closes on submit, on explicit
   // clear, or when typing drops below the minimum length — so a user who types a partial
@@ -636,6 +713,32 @@ async function main() {
     state.needsRedraw = true;
   });
 
+  mapCanvas.addEventListener('click', (event) => {
+    // Mid-gesture there's nothing meaningful to pick, matching onPointerMove's own guard.
+    if (state.interacting || !lastTransform) return;
+
+    // At block LOD, picking returns block-space ids, not parcel-space ones — and blocks
+    // aren't a selectable/pinnable entity anywhere else in the app (no "pinned block"
+    // concept; block hover only shows transient info via titleBlock.showBlock). Treat a
+    // click here as a no-op for selection state rather than corrupting
+    // state.searchSelectedId with a block id that drawParcels/onPointerMove/pointerleave
+    // all assume is parcel-space.
+    if (lastLod === 'block') return;
+
+    if (state.pickDirty) refreshPicking();
+
+    const rect = mapCanvas.getBoundingClientRect();
+    const id = picking.pick(event.clientX - rect.left, event.clientY - rect.top);
+
+    if (id == null) {
+      // A click on a street or outside the ámbito deselects — mirrors the ✕ button.
+      clearSelection();
+    } else {
+      // Selected in place: you already clicked what's on screen, so the view shouldn't move.
+      pinFeature(id, { fly: false });
+    }
+  });
+
   for (const btn of document.querySelectorAll('.segmented button')) {
     btn.addEventListener('click', () => setAttribute(btn.dataset.attr));
   }
@@ -645,8 +748,13 @@ async function main() {
     state.needsRedraw = true;
   });
 
+  document.getElementById('untracked-toggle').addEventListener('change', (e) => {
+    state.showUntracked = e.target.checked;
+    applyAttribute();
+  });
+
   document.getElementById('hist-clear').addEventListener('click', () => {
-    histogram.render(buildBins(state.attr, valuesFor(state.attr)));
+    histogram.render(buildBins(state.attr, legendValues()));
     state.selected = null;
     document.getElementById('hist-clear').hidden = true;
     state.needsRedraw = true;
@@ -654,7 +762,7 @@ async function main() {
 
   window.addEventListener('resize', () => {
     sizeCanvases();
-    histogram.render(buildBins(state.attr, valuesFor(state.attr)));
+    histogram.render(buildBins(state.attr, legendValues()));
   });
 
   window.__atlas = {
@@ -692,5 +800,6 @@ async function main() {
 
 main().catch((err) => {
   console.error(err);
-  document.getElementById('coverage').textContent = `No se pudieron cargar los datos: ${err.message}`;
+  hint.textContent = `No se pudieron cargar los datos: ${err.message}`;
+  hint.style.opacity = '1';
 });
