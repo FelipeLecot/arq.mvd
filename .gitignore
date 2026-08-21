@@ -1,9 +1,7 @@
 node_modules/
 dist/
 
-# Raw downloads from the IM endpoints — large, regenerable via `npm run fetch`.
-data/raw/
-
-# Built artefacts — regenerable via `npm run build:data`.
-data/*.topo.json
-data/attrs.json
+# Generated data — raw downloads (regenerable via `npm run fetch`) and built artefacts
+# (regenerable via `npm run build:data`). Uploaded to S3 by the Build Data workflow,
+# never committed: the artefacts are tens of MB each.
+data/*

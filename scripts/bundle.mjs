@@ -7,12 +7,11 @@
 // this, first load ships tens of MB that the wire never needed to carry.
 
 import { createServer } from 'node:http';
-import { readFile, writeFile, readdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join, extname, normalize } from 'node:path';
-import { gzipSync } from 'node:zlib';
 import * as esbuild from 'esbuild';
-import { ROOT, DIST_DIR, SRC_DIR, DATA_DIR } from './paths.mjs';
+import { ROOT, DIST_DIR, SRC_DIR } from './paths.mjs';
+import { precompress, precompressData } from './precompress.mjs';
 
 const serve = process.argv.includes('--serve');
 const PORT = Number(process.env.PORT || 5173);
@@ -36,19 +35,13 @@ const MIME = {
   '.map': 'application/json; charset=utf-8',
 };
 
-/** Write `file.gz` alongside `file`, compressed once at build time instead of per request. */
-async function precompress(file) {
-  const gz = await gzipSync(await readFile(file), { level: 9 });
-  await writeFile(`${file}.gz`, gz);
-}
-
 if (!serve) {
   await esbuild.build(buildOptions);
   await precompress(join(DIST_DIR, 'bundle.js'));
-  for (const name of await readdir(DATA_DIR)) {
-    // Only top-level data assets; skip anything already compressed (.gz) or non-data.
-    if (name.endsWith('.json')) await precompress(join(DATA_DIR, name));
-  }
+  // Data assets are built by `npm run build:data` and shipped to S3 by the Build Data
+  // workflow, not committed — so a fresh checkout (e.g. the Deploy workflow) has no
+  // data/ directory at all. Compress what exists, skip cleanly when it doesn't.
+  await precompressData();
   console.log('bundled to dist/bundle.js');
 } else {
   const ctx = await esbuild.context(buildOptions);
