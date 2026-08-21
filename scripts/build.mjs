@@ -1,4 +1,5 @@
-// Build stage: raw sources -> data/centro.topo.json, data/vias.topo.json, data/attrs.json
+// Build stage: raw sources -> data/centro.topo.json, data/vias.topo.json,
+// data/attrs.core.json, data/attrs.detail.json
 //
 // Geometry and attributes are emitted to SEPARATE files on purpose. Switching the active
 // attribute or restyling must never re-parse geometry, so the browser loads topology once
@@ -11,7 +12,7 @@
 // Those parcels get grado 'NA' ("fuera del inventario patrimonial") rather than being
 // folded into Centro's 'SC' ("Sin Catalogar") — the two mean different things.
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as shapefile from 'shapefile';
 import { topology } from 'topojson-server';
@@ -491,10 +492,30 @@ async function main() {
     },
   };
 
+  // ---- Split attributes into core (blocking) and detail (lazy) -----------------------
+  // The browser needs only the render/search columns before first paint; everything else
+  // is read solely when the hover/click panel opens, so it ships in a second file that
+  // src/data.js loads on demand (see loadDetail). A column added to the build but not
+  // listed here silently lands in the detail file — the safe default, since hover.js
+  // tolerates missing arrays but the startup path does not.
+  const CORE_ATTR_KEYS = new Set([
+    'id', 'padron', 'sector', 'grado', 'altura', 'permits',
+    'lastPermitYear', 'address', 'gradoDetail',
+  ]);
+  const coreAttrs = {};
+  const detailAttrs = {};
+  for (const [key, values] of Object.entries(attrs)) {
+    (CORE_ATTR_KEYS.has(key) ? coreAttrs : detailAttrs)[key] = values;
+  }
+
   await writeFile(join(DATA_DIR, 'centro.topo.json'), JSON.stringify(parcelsTopo));
   await writeFile(join(DATA_DIR, 'vias.topo.json'), JSON.stringify(viasTopo));
   await writeFile(join(DATA_DIR, 'blocks.topo.json'), JSON.stringify(blocksTopo));
-  await writeFile(join(DATA_DIR, 'attrs.json'), JSON.stringify({ meta, attrs, blockAttrs }));
+  await writeFile(join(DATA_DIR, 'attrs.core.json'), JSON.stringify({ meta, attrs: coreAttrs, blockAttrs }));
+  await writeFile(join(DATA_DIR, 'attrs.detail.json'), JSON.stringify({ attrs: detailAttrs }));
+  // A stale monolithic attrs.json from a pre-split build would double the data payload
+  // served from data/ without ever being read.
+  await rm(join(DATA_DIR, 'attrs.json'), { force: true });
 
   console.log('Build complete:');
   for (const [k, v] of Object.entries(stats)) {

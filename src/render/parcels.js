@@ -128,6 +128,7 @@ export function drawParcels(ctx, items, t, opts) {
     height,
     idColors,
     dimAlpha = 0.22,
+    interacting = false,
   } = opts;
 
   const order = opts.order;
@@ -173,7 +174,9 @@ export function drawParcels(ctx, items, t, opts) {
 
     // A hairline separates neighbours in a dense block; below ~2px a parcel is smaller
     // than its own outline, so the stroke is dropped rather than smearing the fill.
-    if (maxX - minX > 2.5 && isSelected) {
+    // Mid-gesture it is dropped unconditionally: it is a per-parcel stroke pass over
+    // everything on screen, and a moving map reads fine without it.
+    if (maxX - minX > 2.5 && isSelected && !interacting) {
       ctx.strokeStyle = 'rgba(14,18,25,0.55)';
       ctx.lineWidth = 0.5;
       ctx.stroke();

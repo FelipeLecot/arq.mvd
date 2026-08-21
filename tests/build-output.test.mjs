@@ -8,27 +8,39 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { DATA_DIR } from '../scripts/paths.mjs';
 
-const attrsPath = join(DATA_DIR, 'attrs.json');
+const corePath = join(DATA_DIR, 'attrs.core.json');
+const detailPath = join(DATA_DIR, 'attrs.detail.json');
 const blocksPath = join(DATA_DIR, 'blocks.topo.json');
-const hasBuild = existsSync(attrsPath);
+const hasBuild = existsSync(corePath);
 const skip = hasBuild ? false : 'run `npm run fetch && npm run build:data` first';
 const skipBlocks = hasBuild && existsSync(blocksPath) ? false : 'run `npm run fetch && npm run build:data` first';
 
+// The build splits attributes into a blocking core file and a lazy detail file (see
+// scripts/build.mjs); the assertions below describe the merged view the browser ends up
+// with, so read both and recombine.
+const cached = hasBuild
+  ? (() => {
+      const core = JSON.parse(readFileSync(corePath, 'utf8'));
+      const detail = JSON.parse(readFileSync(detailPath, 'utf8'));
+      return { meta: core.meta, blockAttrs: core.blockAttrs, attrs: { ...detail.attrs, ...core.attrs } };
+    })()
+  : null;
+
 test('Centro keeps its own 9016 curated features, ids first', { skip }, () => {
-  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { attrs } = cached;
   assert.equal(attrs.id.slice(0, 9016).join(','), Array.from({ length: 9016 }, (_, i) => i).join(','));
   assert.equal(attrs.padron.slice(0, 9016).filter((p) => p === null).length, 0);
 });
 
 test('citywide parcels from v_mdg_parcelas fill out the rest', { skip }, () => {
-  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { attrs } = cached;
   // 208,556 raw POT parcels minus however many padrones Centro's own inventory already
   // covers; a collapse toward 9016 means the POT source stopped loading.
   assert.ok(attrs.id.length > 200000, `expected >200k total parcels, got ${attrs.id.length}`);
 });
 
 test('the 92 Centro "Altura especial" parcels are null, not 0', { skip }, () => {
-  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { attrs } = cached;
   // Within Centro specifically, a 0 would mean the old parseFloat()||0 bug came back —
   // Centro's own altura field never carries a genuine "0", only the special-regime string.
   assert.equal(attrs.altura.slice(0, 9016).filter((a) => a === null).length, 92);
@@ -40,7 +52,7 @@ test('the 92 Centro "Altura especial" parcels are null, not 0', { skip }, () => 
 });
 
 test('grade distribution: Centro grades untouched by pass 1, Ciudad Vieja grades merged in by pass 2', { skip }, () => {
-  const { meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { meta } = cached;
   // Re-measured 2026-08-08 against a fresh fetch (previously 2026-08-07: G1 was 2351). RG is
   // Centro-only and unchanged from the pre-expansion figure (3875) since pass 1 doesn't
   // consult the Ciudad Vieja map; every other grade grew by however many Ciudad Vieja
@@ -59,7 +71,7 @@ test('grade distribution: Centro grades untouched by pass 1, Ciudad Vieja grades
 });
 
 test('citywide coverage stats are internally consistent', { skip }, () => {
-  const { meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { meta } = cached;
   assert.equal(meta.coverage.centroParcels, 9016);
   assert.equal(meta.coverage.centroAlturaEspecial, 92);
   // Citywide permit/address coverage is expected to differ from the old Centro-only
@@ -69,7 +81,7 @@ test('citywide coverage stats are internally consistent', { skip }, () => {
 });
 
 test('addresses carry an actual door number, not just a street name', { skip }, () => {
-  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { attrs } = cached;
   // Regression guard for the NUM_PUERTA bug (Task 7): the old fallback chain
   // (PUERTA/NRO_PUERTA/NRO) never matched v_mdg_accesos' real field, so every populated
   // address was street-name-only and addressPct > 90 above would have passed even in that
@@ -80,7 +92,7 @@ test('addresses carry an actual door number, not just a street name', { skip }, 
 });
 
 test('geometry is projected into Web Mercator and spans the full city, not just Centro', { skip }, () => {
-  const { meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { meta } = cached;
   const [minX, minY, maxX, maxY] = meta.bbox;
   // Montevideo department in EPSG:3857; wide enough to catch a mis-zoned build but loose
   // enough to allow for future coastal/rural parcels at the edges of v_mdg_parcelas.
@@ -91,7 +103,7 @@ test('geometry is projected into Web Mercator and spans the full city, not just 
 });
 
 test('blocks: touching parcels merge into far fewer city-block shapes', { skip }, () => {
-  const { meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { meta } = cached;
   // Re-measured 2026-08-08 against a fresh fetch (previously 2026-08-02: 8360). A *large*
   // deviation would mean the adjacency tolerance or the underlying parcel geometry changed;
   // this project's live upstream parcel data drifts by a handful of blocks between fetches
@@ -107,7 +119,7 @@ test('blocks: touching parcels merge into far fewer city-block shapes', { skip }
 });
 
 test('blocks: the union actually dissolves, rather than falling back to unmerged members', { skip }, () => {
-  const { meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { meta } = cached;
   // The whole point of merging is one outline per block. When buildBlocks ran against raw
   // pre-quantization coordinates, polygon-clipping choked on sub-tolerance digitizing noise
   // at shared parcel edges and 2942 of 8360 blocks (35.2%) fell back to keeping their
@@ -122,7 +134,7 @@ test('blocks: the union actually dissolves, rather than falling back to unmerged
 });
 
 test('blocks: the emitted topology matches the ids and count the client assumes', { skip: skipBlocks }, () => {
-  const { meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { meta } = cached;
   const topo = JSON.parse(readFileSync(blocksPath, 'utf8'));
   const geometries = topo.objects.blocks.geometries;
 
@@ -139,7 +151,7 @@ test('blocks: the emitted topology matches the ids and count the client assumes'
 });
 
 test('blocks: attribute arrays are index-aligned and fully populated', { skip }, () => {
-  const { blockAttrs, meta } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { blockAttrs, meta } = cached;
   const n = meta.counts.blocks;
   for (const key of ['id', 'parcelIds', 'parcelCount', 'grado', 'gradoSharePct', 'altura', 'permits']) {
     assert.equal(blockAttrs[key].length, n, `blockAttrs.${key} length mismatch`);
@@ -149,7 +161,7 @@ test('blocks: attribute arrays are index-aligned and fully populated', { skip },
 });
 
 test('gradoSource identifies which survey graded each parcel', { skip }, () => {
-  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { attrs } = cached;
   assert.equal(attrs.gradoSource.slice(0, 9016).filter((s) => s !== 'centro').length, 0, 'every Centro parcel is gradoSource centro');
   const cvCount = attrs.gradoSource.filter((s) => s === 'ciudad-vieja').length;
   // Measured 1743 of the 1835 raw Ciudad Vieja heritage records (meta build log's
@@ -159,7 +171,7 @@ test('gradoSource identifies which survey graded each parcel', { skip }, () => {
 });
 
 test('Ciudad Vieja cv* fields are populated exactly where gradoSource says they should be', { skip }, () => {
-  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { attrs } = cached;
   for (let i = 0; i < attrs.id.length; i++) {
     const hasCv = attrs.cvGrado2000[i] !== null || attrs.cvEstadoConsExt[i] !== null;
     if (attrs.gradoSource[i] === 'ciudad-vieja') {
@@ -173,14 +185,14 @@ test('Ciudad Vieja cv* fields are populated exactly where gradoSource says they 
 });
 
 test('the remaining v_mdg_parcelas fields are populated citywide', { skip }, () => {
-  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { attrs } = cached;
   assert.ok(attrs.areaTotal.filter((v) => v !== null).length > 200000, 'areaTotal should be ~100% populated');
   assert.ok(attrs.categoriaZona.filter((v) => v !== null).length > 200000, 'categoriaZona should be ~100% populated');
   assert.equal(typeof attrs.esPropiedadHorizontal[0], 'boolean');
 });
 
 test('landmark fields (protectionType, direccion) ride alongside the existing architect/date fields', { skip }, () => {
-  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { attrs } = cached;
   const withArchitect = attrs.architect.filter((v) => v !== null).length;
   const withProtectionType = attrs.protectionType.filter((v) => v !== null).length;
   const withDireccion = attrs.direccion.filter((v) => v !== null).length;
@@ -191,7 +203,7 @@ test('landmark fields (protectionType, direccion) ride alongside the existing ar
 });
 
 test('permit firstYear/totalArea/expediente are wired through and internally consistent', { skip }, () => {
-  const { attrs } = JSON.parse(readFileSync(attrsPath, 'utf8'));
+  const { attrs } = cached;
   let violations = 0;
   let totalAreaViolations = 0;
   for (let i = 0; i < attrs.id.length; i++) {
@@ -203,4 +215,24 @@ test('permit firstYear/totalArea/expediente are wired through and internally con
   assert.equal(violations, 0);
   assert.equal(totalAreaViolations, 0, 'totalPermitArea should never be set without a corresponding permits count');
   assert.ok(attrs.lastPermitExpediente.filter((v) => v !== null).length > 0, 'at least some permits should carry an expediente');
+});
+
+test('the core/detail attrs split covers every column exactly once', { skip }, () => {
+  const core = JSON.parse(readFileSync(corePath, 'utf8'));
+  const detail = JSON.parse(readFileSync(detailPath, 'utf8'));
+  const coreKeys = Object.keys(core.attrs);
+  const detailKeys = Object.keys(detail.attrs);
+  const overlap = coreKeys.filter((k) => detailKeys.includes(k));
+  assert.deepEqual(overlap, [], 'a column must live in exactly one of the two files');
+  // The startup path (rendering, search, the panel's always-visible rows) reads these
+  // before loadDetail() can have run — if one of them drifts into the detail file, first
+  // paint breaks rather than merely degrades. Keep in sync with CORE_ATTR_KEYS in
+  // scripts/build.mjs.
+  for (const key of ['id', 'padron', 'sector', 'grado', 'altura', 'permits', 'lastPermitYear', 'address', 'gradoDetail']) {
+    assert.ok(coreKeys.includes(key), `attrs.${key} must ship in the blocking core file`);
+  }
+  const n = core.attrs.id.length;
+  for (const key of detailKeys) {
+    assert.equal(detail.attrs[key].length, n, `detail column ${key} is not index-aligned with attrs.id`);
+  }
 });

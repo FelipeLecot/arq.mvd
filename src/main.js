@@ -49,11 +49,21 @@ function viewportMercatorBounds(t, width, height, extrude, exaggeration) {
   return [minX, minY, maxX, maxY];
 }
 
-/** Visible parcel ids, back-to-front by Mercator northing (the painter's algorithm). */
+/**
+ * Visible parcel ids, back-to-front by Mercator northing (the painter's algorithm).
+ *
+ * The ordering is precomputed once per dataset (`parcelDrawOrder` — `cy` never changes),
+ * so a frame only marks which of the queried ids are visible and walks the static order,
+ * instead of re-sorting up to the full viewport budget every frame.
+ */
 function visibleParcelOrder(t, width, height, extrude, exaggeration) {
   const [minX, minY, maxX, maxY] = viewportMercatorBounds(t, width, height, extrude, exaggeration);
   const ids = queryIds(parcelIndex, minX, minY, maxX, maxY);
-  return ids.sort((a, b) => items[b].cy - items[a].cy);
+  for (const id of ids) parcelMark[id] = 1;
+  const out = [];
+  for (const id of parcelDrawOrder) if (parcelMark[id]) out.push(id);
+  for (const id of ids) parcelMark[id] = 0;
+  return out;
 }
 
 /**
@@ -74,11 +84,15 @@ function visibleLines(t, width, height) {
   return queryIds(streetIndex, minX, minY, maxX, maxY).map((id) => lines[id]);
 }
 
-/** Visible block ids, back-to-front — blocks never extrude, so no extra padding needed. */
+/** Visible block ids, back-to-front — same precomputed-order scheme as parcels above. */
 function visibleBlockOrder(t, width, height) {
   const [minX, minY, maxX, maxY] = viewportMercatorBounds(t, width, height, false, 1);
   const ids = queryIds(blockIndex, minX, minY, maxX, maxY);
-  return ids.sort((a, b) => blockItems[b].cy - blockItems[a].cy);
+  for (const id of ids) blockMark[id] = 1;
+  const out = [];
+  for (const id of blockDrawOrder) if (blockMark[id]) out.push(id);
+  for (const id of ids) blockMark[id] = 0;
+  return out;
 }
 
 /**
@@ -140,6 +154,13 @@ let blockIndex;
 let blockIdColors;
 let blockColors;
 let blockHeights;
+// Painter's-algorithm order, precomputed once per dataset (ids sorted back-to-front by
+// Mercator northing), plus a reusable 0/1 mark array the per-frame visible-id filter
+// flips on and off — see visibleParcelOrder/visibleBlockOrder.
+let parcelDrawOrder = [];
+let parcelMark = new Uint8Array(0);
+let blockDrawOrder = [];
+let blockMark = new Uint8Array(0);
 // Transform and extrusion mode of the last painted frame, so the picking buffer can be
 // rebuilt later to match exactly what is on screen.
 let lastTransform = null;
@@ -261,6 +282,7 @@ function redraw() {
       hoveredId: state.hoveredLod === 'block' ? state.hoveredId : null,
       width: rect.width,
       height: rect.height,
+      interacting: state.interacting,
     });
   } else {
     // Extruding all parcels costs far more than a frame at city scale, so an
@@ -280,15 +302,21 @@ function redraw() {
       pinnedId: state.searchSelectedId,
       width: rect.width,
       height: rect.height,
+      interacting: state.interacting,
     });
     lastExtrude = liveExtrude;
   }
 
-  drawLabels(mapCtx, visLines, t, {
-    zoomK: state.transform.k,
-    width: rect.width,
-    height: rect.height,
-  });
+  // Labels re-run collision resolution against every visible street each frame; that is
+  // work a moving map can't afford and the eye can't read anyway. They return the moment
+  // the gesture settles.
+  if (!state.interacting) {
+    drawLabels(mapCtx, visLines, t, {
+      zoomK: state.transform.k,
+      width: rect.width,
+      height: rect.height,
+    });
+  }
 
   mapCtx.restore();
 
@@ -297,6 +325,7 @@ function redraw() {
   lastTransform = t;
   lastLod = lod;
   state.pickDirty = true;
+  queuePickRefresh();
 }
 
 /** Rebuild the picking buffer to match the last painted frame. */
@@ -336,6 +365,28 @@ function refreshPicking() {
   state.pickDirty = false;
 }
 
+// One idle-callback in flight at a time; redraw() re-queues after every frame that leaves
+// the buffer stale, so the flag is what keeps a long interaction from stacking callbacks.
+let pickRefreshQueued = false;
+
+/**
+ * Rebuild the picking buffer when the browser has nothing better to do, so the cost
+ * usually never lands inside a pointermove at all — onPointerMove still rebuilds
+ * synchronously if the pointer arrives before the idle callback ran. Skipped mid-gesture:
+ * the buffer would be stale again by the next frame anyway (see onPointerMove's guard),
+ * and 'end' triggers a redraw whose queue call takes over once the gesture settles.
+ */
+function queuePickRefresh() {
+  if (pickRefreshQueued || !state.pickDirty) return;
+  pickRefreshQueued = true;
+  const run = () => {
+    pickRefreshQueued = false;
+    if (state.pickDirty && !state.interacting && lastTransform) refreshPicking();
+  };
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 250 });
+  else setTimeout(run, 150);
+}
+
 // Last full-redraw cost in ms, readable from the console as `__atlas.lastRedrawMs`.
 // Cheap to keep, and the only way to tell a real draw cost from vsync cadence.
 export const perf = { lastRedrawMs: 0 };
@@ -348,6 +399,27 @@ function frame() {
     perf.lastRedrawMs = performance.now() - t0;
   }
   requestAnimationFrame(frame);
+}
+
+/**
+ * Show a parcel's title block, pulling attrs.detail.json in on first use. The core
+ * columns render immediately; once the detail fetch resolves, whatever the panel is
+ * showing *right now* is re-rendered so its detail rows appear (a later hover re-renders
+ * anyway, but a pinned parcel sitting under a still cursor would otherwise never refresh).
+ * A block-LOD hover is left alone — blocks have no parcel-detail rows to gain.
+ */
+function showParcel(id) {
+  titleBlock.show(id, atlas.attrs);
+  atlas
+    .loadDetail()
+    .then(() => {
+      if (state.hoveredLod === 'parcel' && state.hoveredId != null) {
+        titleBlock.show(state.hoveredId, atlas.attrs);
+      } else if (!(state.hoveredLod === 'block' && state.hoveredId != null) && state.searchSelectedId != null) {
+        titleBlock.show(state.searchSelectedId, atlas.attrs);
+      }
+    })
+    .catch(() => {});
 }
 
 function onPointerMove(event) {
@@ -368,7 +440,7 @@ function onPointerMove(event) {
     // Falls back to the pinned search result rather than blanking the panel — the pin
     // is the default content, hover is only a temporary override.
     if (state.searchSelectedId != null) {
-      titleBlock.show(state.searchSelectedId, atlas.attrs);
+      showParcel(state.searchSelectedId);
       hint.style.opacity = '0';
     } else {
       titleBlock.hide();
@@ -378,7 +450,7 @@ function onPointerMove(event) {
     titleBlock.showBlock(id, atlas.blockAttrs);
     hint.style.opacity = '0';
   } else {
-    titleBlock.show(id, atlas.attrs);
+    showParcel(id);
     hint.style.opacity = '0';
   }
 }
@@ -426,9 +498,11 @@ async function main() {
   streetIndex = buildIndex(lines);
   idColors = items.map((_, i) => idToColor(i));
   heights = atlas.attrs.altura;
+  parcelDrawOrder = items.map((_, i) => i).sort((a, b) => items[b].cy - items[a].cy);
+  parcelMark = new Uint8Array(items.length);
 
-  // Block attributes ride along in attrs.json, so they are available immediately — only
-  // the block geometry is deferred (see loadBlocks below).
+  // Block attributes ride along in attrs.core.json, so they are available immediately —
+  // only the block geometry is deferred (see loadBlocks below).
   blockHeights = atlas.blockAttrs.altura;
 
   histogram = createHistogram(document.getElementById('hist'), {
@@ -452,20 +526,35 @@ async function main() {
   sizeCanvases();
   applyAttribute();
 
+  // Sticky touchpad classifier: trackpads emit pixel-mode wheel events with fractional
+  // deltas, which mouse wheels virtually never produce, so the first fractional event
+  // flips the device guess for the rest of the session. After that, two-finger scrolls
+  // pan the map instead of zooming it; pinch gestures (ctrlKey wheel) always zoom.
+  let inputDevice = 'mouse';
+  const isTouchpadScroll = (event) => {
+    if (event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) return false;
+    if (!Number.isInteger(event.deltaX) || !Number.isInteger(event.deltaY)) inputDevice = 'touchpad';
+    return inputDevice === 'touchpad';
+  };
+
   const zoomBehavior = d3zoom()
     .scaleExtent([0.6, 60])
     .filter((event) => {
-      // Scroll/pinch-to-zoom (wheel), touch/pen panning (touchstart), and double-click-zoom
-      // (dblclick) are all unaffected by the middle-button-pan restriction below — d3-zoom
-      // only ever calls this filter for these four event types, checked against the
-      // installed d3-zoom v3 source (node_modules/d3-zoom/src/zoom.js).
-      if (event.type === 'wheel' || event.type === 'touchstart' || event.type === 'dblclick') return true;
-      // Mouse-driven drag-panning (mousedown) is restricted to the middle button, freeing
-      // the left button for click-to-select.
-      return event.button === 1;
+      // Mouse-wheel zoom, trackpad pinch-to-zoom (ctrlKey wheel), touch/pen panning
+      // (touchstart) and double-click-zoom (dblclick) are all unaffected by the
+      // button restriction below — d3-zoom only ever calls this filter for these four
+      // event types, checked against the installed d3-zoom v3 source
+      // (node_modules/d3-zoom/src/zoom.js). Non-pinch trackpad scrolls are rejected here
+      // and handled as panning by the dedicated wheel listener below.
+      if (event.type === 'wheel') return event.ctrlKey || !isTouchpadScroll(event);
+      if (event.type === 'touchstart' || event.type === 'dblclick') return true;
+      // Left- or middle-button drag pans the map; the left button doubles as
+      // click-to-select, disambiguated by pointer travel in the click handler below.
+      return event.button === 0 || event.button === 1;
     })
     .on('start', () => {
       state.interacting = true;
+      mapCanvas.classList.add('is-panning');
     })
     .on('zoom', (event) => {
       state.transform = event.transform;
@@ -474,10 +563,25 @@ async function main() {
     })
     .on('end', () => {
       state.interacting = false;
+      mapCanvas.classList.remove('is-panning');
       state.needsRedraw = true;
     });
 
   select(mapCanvas).call(zoomBehavior);
+
+  // Two-finger trackpad scrolls pan the map (the filter above routes them away from
+  // d3-zoom); mouse wheels and pinches fall through to d3-zoom's own wheel handling.
+  // Page-scroll semantics: swipe down reveals content further down, like any document.
+  mapCanvas.addEventListener(
+    'wheel',
+    (event) => {
+      if (event.ctrlKey || !isTouchpadScroll(event)) return;
+      event.preventDefault();
+      const { k } = state.transform;
+      select(mapCanvas).call(zoomBehavior.translateBy, -event.deltaX / k, -event.deltaY / k);
+    },
+    { passive: false },
+  );
 
   // Windows/Linux browsers otherwise enter native autoscroll mode on a middle-button press
   // over a non-scrolling element, which fights with d3-zoom's own drag handling.
@@ -540,7 +644,7 @@ async function main() {
    */
   function pinFeature(id, { fly }) {
     state.searchSelectedId = id;
-    titleBlock.show(id, atlas.attrs);
+    showParcel(id);
     hint.style.opacity = '0';
     const sector = atlas.attrs.sector[id];
     const padron = atlas.attrs.padron[id];
@@ -704,7 +808,7 @@ async function main() {
   mapCanvas.addEventListener('pointerleave', () => {
     state.hoveredId = null;
     if (state.searchSelectedId != null) {
-      titleBlock.show(state.searchSelectedId, atlas.attrs);
+      showParcel(state.searchSelectedId);
       hint.style.opacity = '0';
     } else {
       titleBlock.hide();
@@ -713,9 +817,20 @@ async function main() {
     state.needsRedraw = true;
   });
 
+  // Where the left button went down, so the click handler can tell a selection click
+  // from the click event every left-drag pan ends with.
+  let downAt = null;
+  mapCanvas.addEventListener('pointerdown', (event) => {
+    downAt = event.button === 0 ? [event.clientX, event.clientY] : null;
+  });
+
   mapCanvas.addEventListener('click', (event) => {
     // Mid-gesture there's nothing meaningful to pick, matching onPointerMove's own guard.
     if (state.interacting || !lastTransform) return;
+
+    // A dragged pointer also fires a click on release — only near-stationary pointers
+    // count as selection clicks (4px of slop absorbs hand tremor).
+    if (downAt && Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) > 4) return;
 
     // At block LOD, picking returns block-space ids, not parcel-space ones — and blocks
     // aren't a selectable/pinnable entity anywhere else in the app (no "pinned block"
@@ -786,6 +901,8 @@ async function main() {
       blockItems = prepareFeatures(blocks);
       blockIndex = buildIndex(blockItems);
       blockIdColors = blockItems.map((_, i) => idToColor(i));
+      blockDrawOrder = blockItems.map((_, i) => i).sort((a, b) => blockItems[b].cy - blockItems[a].cy);
+      blockMark = new Uint8Array(blockItems.length);
       // redraw()'s own LOD logic decides parcel vs. block from here on (see
       // BLOCK_LOD_PARCEL_BUDGET) — an unconditional redraw is cheap, and a restored hash
       // can already be panned somewhere dense enough that blocks should show immediately.

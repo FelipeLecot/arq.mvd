@@ -277,7 +277,8 @@ h1, h2 { margin: 0; font-weight: 400; }
   display: block;
 }
 
-#map { cursor: crosshair; }
+#map { cursor: grab; }
+#map.is-panning { cursor: grabbing; }
 #overlay { pointer-events: none; }
 
 .stage__hint {

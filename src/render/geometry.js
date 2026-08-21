@@ -110,19 +110,15 @@ export function traceRing(ctx, ring, t, ox = 0, oy = 0) {
   ctx.closePath();
 }
 
-/** Screen-space bounding box of a prepared feature, for viewport culling. */
+/**
+ * Screen-space bounding box of a prepared feature, for viewport culling.
+ *
+ * The affine transform is monotonic on each axis (x preserved, y flipped), so the screen
+ * bbox is just the transformed corners of the feature's static Mercator-space
+ * `bounds` — O(1) per feature per frame instead of a walk over every ring vertex, which
+ * at a full viewport of parcels was measurable in the frame budget.
+ */
 export function featureBounds(item, t) {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const rings of item.polygons) {
-    const r = rings[0];
-    for (let i = 0; i < r.length; i += 2) {
-      const x = r[i] * t.a + t.bx;
-      const y = -r[i + 1] * t.a + t.by;
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    }
-  }
-  return [minX, minY, maxX, maxY];
+  const [minX, minY, maxX, maxY] = item.bounds;
+  return [minX * t.a + t.bx, -maxY * t.a + t.by, maxX * t.a + t.bx, -minY * t.a + t.by];
 }
